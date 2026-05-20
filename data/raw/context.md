@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
-> **Last updated:** 2026-05-18
-> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`.
+> **Last updated:** 2026-05-16
+> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run.
 
 ---
 
@@ -23,7 +23,7 @@
 
 ## 2. The service (MVP)
 
-The MVP is **SMS and email follow-up on missed calls and stale quotes**. Missed-call capture should not depend primarily on custom integrations with each shop's existing call-log/FSM stack, because every shop may use a different system or no system at all. The preferred missed-call capture method is conditional call forwarding into an auxiliary Twilio tracking/recovery number controlled by Vigil. It does not include a live AI receptionist — that is explicitly Post-MVP and only sold after a customer is established (see §3). This is a deliberate departure from earlier drafts that bundled live call answering into the MVP.
+The MVP is **SMS and email follow-up on missed calls and stale quotes pulled from the owner's existing system**. It does not include a live AI receptionist — that is explicitly Post-MVP and only sold after a customer is established (see §3). This is a deliberate departure from earlier drafts that bundled live call answering into the MVP.
 
 ### 2.1 Free 7-day audit (the door opener)
 
@@ -260,159 +260,7 @@ The three most likely failure modes, named so they can be watched for:
 
 ---
 
-## 11. Technical workflow and implementation context
-
-### 11.1 Core missed-call capture architecture
-
-Preferred MVP architecture:
-
-```text
-Customer calls contractor's existing business number
-  → contractor misses call
-  → contractor's carrier/phone system conditionally forwards missed call to Vigil's Twilio aux number
-  → Twilio sends webhook to Vigil backend
-  → backend logs caller number and call event
-  → backend sends SMS follow-up from the Twilio aux number
-  → inbound customer replies are logged and routed/escalated
-```
-
-Key principle: to detect missed calls in real time, Vigil or an integrated provider must be in the call path. The lowest-risk approach is **conditional forwarding** rather than routing all calls through Vigil. This avoids changing the contractor's public number and reduces the chance of breaking live inbound calls.
-
-### 11.2 Twilio number requirements
-
-Use a **Twilio Local Canadian number** with:
-
-- `VoiceEnabled = true`
-- `SmsEnabled = true`
-
-A Twilio Mobile number is not required. The aux number receives forwarded missed calls, triggers webhooks, sends SMS follow-ups, and receives SMS replies. Search via Twilio `AvailablePhoneNumbers("CA").local.list({ smsEnabled: true, voiceEnabled: true })`, preferably using GTA area codes such as 416, 437, 647, 905, or 289.
-
-### 11.3 Backend / repo responsibilities
-
-The core product logic should live in a proper TypeScript backend, not primarily in n8n. Recommended stack:
-
-- TypeScript
-- Express or Fastify
-- Twilio Node SDK
-- Supabase Postgres as source of truth
-- n8n for non-critical automation
-
-Backend owns:
-
-- Twilio voice webhook: `/webhooks/twilio/voice`
-- Twilio SMS webhook: `/webhooks/twilio/sms`
-- optional Twilio delivery status webhook
-- client lookup by Twilio aux number
-- missed-call logging
-- SMS sending
-- inbound SMS logging
-- duplicate suppression
-- opt-out handling
-- lead state machine
-- decision tree
-- approved message template selection
-- LLM classifier wrapper, if used
-
-### 11.4 Database
-
-Use Supabase Postgres for MVP/prod. Minimum tables:
-
-- `clients`: business name, owner phone, contractor main number, Twilio aux number
-- `leads`: caller phone, client, status, timestamps
-- `call_events`: Twilio call SID, from/to numbers, call status
-- `messages`: inbound/outbound SMS records, body, Twilio message SID
-- `opt_outs`: client + phone number suppression list
-
-Supabase/Postgres is the source of truth. n8n and spreadsheets may mirror data for convenience but should not own critical state.
-
-### 11.5 n8n responsibilities
-
-Use n8n for operational glue, not the product brain:
-
-- owner/founder notifications
-- Slack/email/SMS alerts
-- weekly reports
-- Google Sheets/Airtable/Notion sync
-- manual admin workflows
-- low-risk report summaries
-
-The backend can call n8n webhooks after important events, e.g. customer reply received or emergency lead detected.
-
-### 11.6 SMS interaction logic
-
-Use a hybrid approach:
-
-- deterministic rules/regex for safety-critical cases
-- LLM classifier for messy intent/urgency/job-type extraction
-- decision tree in code selects approved templates
-- human/owner handles pricing, booking, dispatch, and edge cases
-
-Do not let an LLM freely run customer conversations in v1. It may classify and summarize, but customer-facing responses should mostly be standardized approved templates.
-
-Core decision tree:
-
-```text
-Missed call captured
-├─ Caller opted out
-│  ├─ Log ignored call
-│  └─ End
-├─ Caller/client recently received recovery SMS
-│  ├─ Suppress duplicate
-│  └─ End
-└─ Valid missed call
-   ├─ Create/update lead
-   ├─ Send: “Hi, this is {{Business}}. Sorry we missed your call — do you still need help with a plumbing issue?”
-   └─ Wait for reply
-
-Customer replies
-├─ Opt-out / wrong number
-│  ├─ Send: “Sorry about that — we won’t message again.”
-│  ├─ Mark opted_out or wrong_number
-│  └─ End
-├─ No longer needed / already handled
-│  ├─ Send: “No problem — glad you got it handled. Feel free to reach out if you need anything else.”
-│  ├─ Mark lost
-│  └─ End
-├─ Emergency keyword or LLM emergency
-│  ├─ Send: “That sounds urgent. I’m alerting the team now — can you send the address and confirm someone is on-site?”
-│  ├─ Notify owner/founder immediately
-│  ├─ Mark emergency
-│  └─ End
-├─ Price question
-│  ├─ Send: “We can help. Pricing depends on the issue and access — can you send the address and a quick description of what’s going on?”
-│  ├─ Notify owner/founder
-│  └─ Mark price_question
-├─ No address/details
-│  ├─ Send: “Thanks — what’s the property address, and what issue are you seeing?”
-│  └─ Mark needs_address
-├─ Address/details provided
-│  ├─ Notify owner/founder with customer number, message, job type, urgency, summary
-│  ├─ Send: “Thanks — I’m passing this to the team now. They’ll follow up as soon as possible.”
-│  └─ Mark needs_owner_call
-└─ Unclear
-   ├─ Send: “Thanks — can you send a quick description of what’s going on and the property address?”
-   └─ Mark needs_clarification
-```
-
-If no reply after 15 minutes, send one second follow-up: “Just checking — if you still need help, reply here with what’s going on and we’ll get back to you.” If no reply after the final follow-up window, mark `no_response`.
-
-### 11.7 Deployment path
-
-Local development can use:
-
-```text
-Twilio → ngrok → local TypeScript backend
-```
-
-Before any real pilot, deploy a simple cloud backend:
-
-```text
-Twilio → hosted TypeScript backend → Supabase Postgres → Twilio SMS → n8n notifications/reports
-```
-
-This needs to be a cloud service for real clients because Twilio requires stable public HTTPS webhooks. It does **not** need to be a distributed system. Avoid Kubernetes, microservices, event streaming, and complex queues during MVP.
-
-## 12. Glossary
+## 11. Glossary
 
 - **RAT** — Riskiest Assumption Test. The smallest, cheapest experiment that can validate or kill the biggest unknown.
 - **FSM** — Field Service Management software. Jobber, Housecall Pro, ServiceTitan are the leaders.
@@ -423,13 +271,10 @@ This needs to be a cloud service for real clients because Twilio requires stable
 - **GBP** — Google Business Profile.
 - **Loom** — Async screen-recording tool used for the audit walkthrough. [loom.com](https://www.loom.com)
 - **GoHighLevel** — White-label marketing-automation platform commonly used by small agencies pitching local businesses.
-- **Twilio aux number** — Vigil-controlled local phone number that receives conditionally forwarded missed calls, triggers webhooks, and sends/receives SMS.
-- **Conditional call forwarding** — Carrier/phone-system rule that forwards calls only when unanswered, busy, or unreachable, while leaving the contractor's public number unchanged.
-- **n8n** — Workflow automation tool used for non-critical glue such as notifications, reporting, and syncs; not the source of truth.
 
 ---
 
-## 13. Open questions and known unknowns
+## 12. Open questions and known unknowns
 
 These are unresolved and worth revisiting after the RAT:
 
