@@ -2,7 +2,7 @@
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
-> **Last updated:** 2026-05-18
+> **Last updated:** 2026-05-24
 > **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`.
 
 ---
@@ -262,7 +262,37 @@ The three most likely failure modes, named so they can be watched for:
 
 ## 11. Technical workflow and implementation context
 
-### 11.1 Core missed-call capture architecture
+### 11.1 Backend stack decision
+
+The backend is now **Python + FastAPI**. The core product logic should live in a proper FastAPI backend, not primarily in n8n. Recommended stack:
+
+- Python 3.12+
+- FastAPI
+- Uvicorn/Gunicorn for serving HTTP
+- Twilio Python SDK
+- Supabase Postgres as source of truth
+- SQLAlchemy or SQLModel for database access/migrations, unless using Supabase client directly for the earliest prototype
+- Pydantic models for request/response validation and settings
+- n8n for non-critical automation
+
+Backend owns:
+
+- Twilio voice webhook: `POST /webhooks/twilio/voice`
+- Twilio SMS webhook: `POST /webhooks/twilio/sms`
+- optional Twilio delivery status webhook: `POST /webhooks/twilio/status`
+- client lookup by Twilio aux number
+- missed-call logging
+- SMS sending via Twilio Python SDK
+- inbound SMS logging
+- duplicate suppression
+- opt-out handling
+- lead state machine
+- decision-tree execution
+- approved message template selection
+- LLM classifier wrapper, if used
+- owner/founder notifications, either directly or through n8n webhooks
+
+### 11.2 Core missed-call capture architecture
 
 Preferred MVP architecture:
 
@@ -270,62 +300,170 @@ Preferred MVP architecture:
 Customer calls contractor's existing business number
   → contractor misses call
   → contractor's carrier/phone system conditionally forwards missed call to Vigil's Twilio aux number
-  → Twilio sends webhook to Vigil backend
-  → backend logs caller number and call event
-  → backend sends SMS follow-up from the Twilio aux number
-  → inbound customer replies are logged and routed/escalated
+  → Twilio receives the forwarded call
+  → Twilio sends an HTTP POST webhook to the FastAPI backend
+  → FastAPI logs caller number and call event in Supabase Postgres
+  → FastAPI sends SMS follow-up through Twilio
+  → inbound customer replies are sent by Twilio to FastAPI via another HTTP POST webhook
+  → FastAPI logs the reply, applies decision logic, and routes/escalates the lead
 ```
 
 Key principle: to detect missed calls in real time, Vigil or an integrated provider must be in the call path. The lowest-risk approach is **conditional forwarding** rather than routing all calls through Vigil. This avoids changing the contractor's public number and reduces the chance of breaking live inbound calls.
 
-### 11.2 Twilio number requirements
+### 11.3 Twilio number requirements
 
 Use a **Twilio Local Canadian number** with:
 
 - `VoiceEnabled = true`
 - `SmsEnabled = true`
 
-A Twilio Mobile number is not required. The aux number receives forwarded missed calls, triggers webhooks, sends SMS follow-ups, and receives SMS replies. Search via Twilio `AvailablePhoneNumbers("CA").local.list({ smsEnabled: true, voiceEnabled: true })`, preferably using GTA area codes such as 416, 437, 647, 905, or 289.
+A Twilio Mobile number is not required. The aux number receives forwarded missed calls, triggers webhooks, sends SMS follow-ups, and receives SMS replies. Search via Twilio `AvailablePhoneNumbers("CA").local.list(sms_enabled=True, voice_enabled=True)`, preferably using GTA area codes such as 416, 437, 647, 905, or 289.
 
-### 11.3 Backend / repo responsibilities
+In the Twilio Console for the aux number:
 
-The core product logic should live in a proper TypeScript backend, not primarily in n8n. Recommended stack:
+- Voice / “A call comes in”: `Webhook`, `POST`, `https://<backend-domain>/webhooks/twilio/voice`
+- Messaging / “A message comes in”: `Webhook`, `POST`, `https://<backend-domain>/webhooks/twilio/sms`
 
-- TypeScript
-- Express or Fastify
-- Twilio Node SDK
-- Supabase Postgres as source of truth
-- n8n for non-critical automation
+### 11.4 What the webhook workflow means, in plain language
 
-Backend owns:
+Twilio is the bridge between the phone network and the internet. A normal backend server cannot directly “hear” phone calls or SMS messages. Twilio can. When the Twilio aux number receives a call or text, Twilio converts that phone-network event into an internet request.
 
-- Twilio voice webhook: `/webhooks/twilio/voice`
-- Twilio SMS webhook: `/webhooks/twilio/sms`
-- optional Twilio delivery status webhook
-- client lookup by Twilio aux number
-- missed-call logging
-- SMS sending
-- inbound SMS logging
-- duplicate suppression
-- opt-out handling
-- lead state machine
-- decision tree
-- approved message template selection
-- LLM classifier wrapper, if used
+That internet request is an **HTTP POST webhook**.
 
-### 11.4 Database
+The mental model is:
+
+```text
+Phone event happens
+  → Twilio notices
+  → Twilio sends HTTP POST webhook to FastAPI
+  → FastAPI receives event data
+  → FastAPI checks Postgres
+  → FastAPI decides what to do
+  → FastAPI may call Twilio's API to send an outbound SMS
+```
+
+HTTP is the basic request/response protocol used by websites, APIs, and webhooks. A client sends a request; a server sends a response. In this workflow, Twilio is the client and the Vigil FastAPI app is the server.
+
+- `GET` usually means: “give me information.” Example: `GET /health`.
+- `POST` usually means: “here is data; process it.” Example: `POST /webhooks/twilio/sms`.
+
+Twilio uses `POST` because it is sending Vigil data about something that happened, such as:
+
+```text
+From = customer's phone number
+To = Vigil/Twilio aux number
+CallSid = Twilio's unique ID for the call
+CallStatus = call state
+Body = SMS body, for text messages
+MessageSid = Twilio's unique ID for the SMS
+```
+
+In FastAPI, a webhook route is just an HTTP endpoint that listens for those requests. Conceptually:
+
+```python
+@app.post("/webhooks/twilio/voice")
+async def twilio_voice_webhook(request: Request):
+    form = await request.form()
+    # read From, To, CallSid, CallStatus
+    # log call
+    # create/update lead
+    # send recovery SMS if allowed
+    return Response(content="<Response><Hangup/></Response>", media_type="text/xml")
+```
+
+For SMS:
+
+```python
+@app.post("/webhooks/twilio/sms")
+async def twilio_sms_webhook(request: Request):
+    form = await request.form()
+    # read From, To, Body, MessageSid
+    # log inbound message
+    # apply opt-out and decision logic
+    # send approved response if needed
+    return Response(content="<Response></Response>", media_type="text/xml")
+```
+
+For voice calls, Twilio expects the backend to return **TwiML**, which is XML telling Twilio what to do with the active call. Example:
+
+```xml
+<Response>
+  <Say>Thanks for calling. The team has been notified.</Say>
+</Response>
+```
+
+or simply:
+
+```xml
+<Response>
+  <Hangup/>
+</Response>
+```
+
+For outbound SMS, the direction reverses. FastAPI calls Twilio's API using the Twilio Python SDK:
+
+```python
+client.messages.create(
+    from_=client.twilio_aux_number,
+    to=lead.phone_number,
+    body="Hi, this is ABC Plumbing. Sorry we missed your call — do you still need help?",
+)
+```
+
+That API call tells Twilio to send an actual SMS over the telecom network.
+
+### 11.5 Local development, ngrok, and production deployment
+
+During local development, FastAPI runs on the founder's laptop, usually at:
+
+```text
+http://localhost:8000
+```
+
+Twilio cannot reach `localhost`, because `localhost` means “this same machine.” From Twilio's perspective, `localhost` is Twilio's own server, not the founder's laptop. Also, the laptop is usually behind a home router/firewall and does not have a stable public HTTPS address.
+
+ngrok creates a public HTTPS tunnel to the local FastAPI server:
+
+```text
+Twilio → https://abc123.ngrok-free.app/webhooks/twilio/voice
+       → ngrok tunnel
+       → http://localhost:8000/webhooks/twilio/voice
+       → FastAPI route handler
+```
+
+Local development can use:
+
+```text
+Twilio → ngrok → local Python/FastAPI backend
+```
+
+Before any real pilot, deploy a simple cloud backend:
+
+```text
+Twilio → hosted Python/FastAPI backend → Supabase Postgres → Twilio SMS → n8n notifications/reports
+```
+
+This needs to be a cloud service for real clients because Twilio requires stable public HTTPS webhooks. It does **not** need to be a distributed system. Avoid Kubernetes, microservices, event streaming, and complex queues during MVP.
+
+### 11.6 Database
 
 Use Supabase Postgres for MVP/prod. Minimum tables:
 
-- `clients`: business name, owner phone, contractor main number, Twilio aux number
-- `leads`: caller phone, client, status, timestamps
-- `call_events`: Twilio call SID, from/to numbers, call status
-- `messages`: inbound/outbound SMS records, body, Twilio message SID
+- `clients`: Vigil customers, e.g. plumbing businesses
+- `client_phone_numbers`: Twilio aux numbers and contractor main numbers; useful once one client has multiple numbers
+- `leads`: customer callers/text senders for a client
+- `conversations`: one active SMS thread per client/lead/channel
+- `call_events`: every Twilio call webhook event
+- `messages`: inbound/outbound SMS records
 - `opt_outs`: client + phone number suppression list
+- `message_templates`: approved client-specific text templates
+- `decision_tree_versions`: versioned client-specific workflow definitions
+- `decision_tree_runs`: audit trail of which rule/tree produced which response
+- `owner_notifications`: notifications sent to founder/client/owner
 
 Supabase/Postgres is the source of truth. n8n and spreadsheets may mirror data for convenience but should not own critical state.
 
-### 11.5 n8n responsibilities
+### 11.7 n8n responsibilities
 
 Use n8n for operational glue, not the product brain:
 
@@ -336,18 +474,26 @@ Use n8n for operational glue, not the product brain:
 - manual admin workflows
 - low-risk report summaries
 
-The backend can call n8n webhooks after important events, e.g. customer reply received or emergency lead detected.
+The FastAPI backend can call n8n webhooks after important events, e.g. customer reply received or emergency lead detected.
 
-### 11.6 SMS interaction logic
+### 11.8 SMS interaction logic and client-specific decision trees
 
 Use a hybrid approach:
 
 - deterministic rules/regex for safety-critical cases
-- LLM classifier for messy intent/urgency/job-type extraction
-- decision tree in code selects approved templates
+- optional LLM classifier for messy intent/urgency/job-type extraction
+- a decision-tree/rules engine in FastAPI that selects approved templates and actions
 - human/owner handles pricing, booking, dispatch, and edge cases
 
 Do not let an LLM freely run customer conversations in v1. It may classify and summarize, but customer-facing responses should mostly be standardized approved templates.
+
+The optimal MVP way to define and store custom client-specific decision logic is:
+
+1. Keep the **execution engine in Python code** so behavior is testable, safe, and reviewable.
+2. Store **client-specific configuration in Postgres**, not hardcoded Python, so each client can have tailored templates, emergency keywords, service areas, hours, escalation contacts, and enabled/disabled workflow branches.
+3. Version every decision tree/config. Never silently overwrite active behavior. Store `decision_tree_versions` with `client_id`, `version`, `status`, `definition_json`, `created_at`, and `approved_at`.
+4. Store every run result. `decision_tree_runs` should record the inbound message, classifier output, matched node/rule, selected template, actions taken, and final lead status. This is critical for debugging and client trust.
+5. For v1, use a constrained JSON/YAML-like schema stored in `jsonb`, not a fully dynamic visual workflow builder. A visual builder is unnecessary before product-market proof.
 
 Core decision tree:
 
@@ -361,56 +507,53 @@ Missed call captured
 │  └─ End
 └─ Valid missed call
    ├─ Create/update lead
-   ├─ Send: “Hi, this is {{Business}}. Sorry we missed your call — do you still need help with a plumbing issue?”
+   ├─ Create/open conversation
+   ├─ Send template: missed_call_initial
    └─ Wait for reply
 
 Customer replies
 ├─ Opt-out / wrong number
-│  ├─ Send: “Sorry about that — we won’t message again.”
+│  ├─ Send template: opt_out_confirm
 │  ├─ Mark opted_out or wrong_number
 │  └─ End
 ├─ No longer needed / already handled
-│  ├─ Send: “No problem — glad you got it handled. Feel free to reach out if you need anything else.”
+│  ├─ Send template: no_longer_needed
 │  ├─ Mark lost
 │  └─ End
 ├─ Emergency keyword or LLM emergency
-│  ├─ Send: “That sounds urgent. I’m alerting the team now — can you send the address and confirm someone is on-site?”
+│  ├─ Send template: emergency_ack
 │  ├─ Notify owner/founder immediately
 │  ├─ Mark emergency
 │  └─ End
 ├─ Price question
-│  ├─ Send: “We can help. Pricing depends on the issue and access — can you send the address and a quick description of what’s going on?”
+│  ├─ Send template: price_question
 │  ├─ Notify owner/founder
 │  └─ Mark price_question
 ├─ No address/details
-│  ├─ Send: “Thanks — what’s the property address, and what issue are you seeing?”
+│  ├─ Send template: request_address_details
 │  └─ Mark needs_address
 ├─ Address/details provided
 │  ├─ Notify owner/founder with customer number, message, job type, urgency, summary
-│  ├─ Send: “Thanks — I’m passing this to the team now. They’ll follow up as soon as possible.”
+│  ├─ Send template: handoff_to_team
 │  └─ Mark needs_owner_call
 └─ Unclear
-   ├─ Send: “Thanks — can you send a quick description of what’s going on and the property address?”
+   ├─ Send template: clarification
    └─ Mark needs_clarification
 ```
 
-If no reply after 15 minutes, send one second follow-up: “Just checking — if you still need help, reply here with what’s going on and we’ll get back to you.” If no reply after the final follow-up window, mark `no_response`.
+If no reply after 15 minutes, send one second follow-up using template `missed_call_second_followup`: “Just checking — if you still need help, reply here with what’s going on and we’ll get back to you.” If no reply after the final follow-up window, mark `no_response`.
 
-### 11.7 Deployment path
+Decision-tree actions should be explicit and limited. Initial action types:
 
-Local development can use:
+- `send_sms_template`
+- `mark_lead_status`
+- `create_opt_out`
+- `notify_owner`
+- `schedule_followup`
+- `suppress_duplicate`
+- `end_conversation`
 
-```text
-Twilio → ngrok → local TypeScript backend
-```
-
-Before any real pilot, deploy a simple cloud backend:
-
-```text
-Twilio → hosted TypeScript backend → Supabase Postgres → Twilio SMS → n8n notifications/reports
-```
-
-This needs to be a cloud service for real clients because Twilio requires stable public HTTPS webhooks. It does **not** need to be a distributed system. Avoid Kubernetes, microservices, event streaming, and complex queues during MVP.
+This gives each client tailored behavior without allowing arbitrary unsafe logic from the database.
 
 ## 12. Glossary
 
