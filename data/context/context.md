@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
-> **Last updated:** 2026-05-24
-> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`.
+> **Last updated:** 2026-05-26
+> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`. Twilio conditional forwarding has been technically validated on a Rogers iPhone; client onboarding remains provider/phone-system specific.
 
 ---
 
@@ -32,7 +32,7 @@ Before they pay anything, prove what they're losing.
 - Track or pull the prospect's last 7 days of inbound calls, voicemails, and outstanding quotes
 - Deliver a one-page report and a short Loom walkthrough: "You missed *N* calls last week. Based on your average ticket, that's approximately $X in unrecovered revenue. The three biggest leaks are A, B, and C."
 - Free. Friction-free. The audit is the cold-outreach hook, not a profit center.
-- Tooling: free-tier Aircall or Google Voice trial + Notion tracker. Cost ceiling for the entire RAT phase: **$80**.
+- Tooling: Twilio local Canadian aux number + Notion tracker for the preferred audit path; Aircall/Google Voice remain fallback/manual audit tools. Cost ceiling for the entire RAT phase: **$80**.
 
 > **Loom** is a free screen-recording tool ([loom.com](https://www.loom.com)) that records your screen + voiceover and gives you a shareable link. Used because async video is higher-trust than a written email for trades owners and faster to produce than a live call. A 20-minute Loom is fine; longer is worse.
 
@@ -40,7 +40,7 @@ Before they pay anything, prove what they're losing.
 
 ### 2.2 Lead Recovery Setup (Weeks 2–4 after pilot signup)
 
-- Connect to their existing call log, CRM, and quote system via API or shared inbox (Jobber, Housecall Pro, QuickBooks, Google Voice, or improvised)
+- Provision a client-specific Twilio aux number and set/test conditional forwarding from their existing business number; if available, also connect to their existing call log, CRM, quote system, or shared inbox (Jobber, Housecall Pro, QuickBooks, Google Voice, or improvised)
 - Install SMS and email follow-up workflows tuned to their services, hours, and service area:
   - Missed-call texts within 60 seconds, with urgency detection (emergency vs. quote request vs. tire-kicker)
   - Stale-quote follow-ups at intervals that actually convert (typical: 24h, 72h, 7d, 14d)
@@ -164,6 +164,8 @@ Reinforce this in every conversation with prospects:
 
 They forward their number (or grant inbox access). The service handles everything. They get a report every Monday. That is the entire ask on their end.
 
+Client-facing setup promise: **guided 5–30 minute setup, no software, no dashboard, no public number change**. Many mobile lines can be configured from the keypad, but exact commands vary by carrier/phone system and voicemail settings can interfere. Do not promise universally instant keypad setup; promise guided setup and live testing.
+
 ---
 
 ## 7. Competitive landscape and positioning
@@ -219,7 +221,7 @@ Attribution disputes ("this booking would have come anyway") and FSM bundling th
 
 After 1 paid pilot is signed.
 
-- Wire up real stack: chosen AI receptionist trial (Numa / Goodcall / Rosie) + scripts + human-reply backup, *only* if needed for delivery — MVP is SMS/email, voice is optional in Stage 1
+- Wire up the cloud-first MVP stack: Twilio Canadian local aux number + hosted FastAPI backend + Supabase Postgres + approved SMS templates + human-reply backup. AI receptionist trials (Numa / Goodcall / Rosie) are not default MVP infrastructure and should only be used if required later for delivery.
 - Run pilot for 30 days, track every missed call → text-back → reply → booked job
 - **Pass criterion:** end-of-month report shows ≥5 recovered jobs at ≥$1,200 avg ticket. That's the ROI proof and the case study.
 - **Kill criterion:** can't reliably recover jobs at the industry-benchmark ~45% text-back success rate → the wedge is fake regardless of sales skill.
@@ -277,6 +279,7 @@ The backend is now **Python + FastAPI**. The core product logic should live in a
 
 Backend owns:
 
+- health check endpoint: `GET /health`
 - Twilio voice webhook: `POST /webhooks/twilio/voice`
 - Twilio SMS webhook: `POST /webhooks/twilio/sms`
 - optional Twilio delivery status webhook: `POST /webhooks/twilio/status`
@@ -309,6 +312,8 @@ Customer calls contractor's existing business number
 ```
 
 Key principle: to detect missed calls in real time, Vigil or an integrated provider must be in the call path. The lowest-risk approach is **conditional forwarding** rather than routing all calls through Vigil. This avoids changing the contractor's public number and reduces the chance of breaking live inbound calls.
+
+Technical validation note: conditional forwarding to a Twilio aux number has been validated on a Rogers iPhone. Rogers accepted no-answer forwarding (`*61*<TwilioNumber>#`), and the iPhone status check showed `Voice Call Forwarding When Unanswered` enabled. Exact setup still varies by provider and phone system.
 
 ### 11.3 Twilio number requirements
 
@@ -358,7 +363,7 @@ Body = SMS body, for text messages
 MessageSid = Twilio's unique ID for the SMS
 ```
 
-In FastAPI, a webhook route is just an HTTP endpoint that listens for those requests. Conceptually:
+In FastAPI, an **endpoint** is a URL path + HTTP method bound to a Python function, e.g. `GET /health` or `POST /webhooks/twilio/voice`. A webhook route is an endpoint that listens for requests sent by another service. Conceptually:
 
 ```python
 @app.post("/webhooks/twilio/voice")
@@ -414,15 +419,27 @@ That API call tells Twilio to send an actual SMS over the telecom network.
 
 ### 11.5 Local development, ngrok, and production deployment
 
-During local development, FastAPI runs on the founder's laptop, usually at:
+Current MVP implementation path is **cloud-first**:
 
 ```text
-http://localhost:8000
+Twilio → hosted Python/FastAPI backend → Supabase Postgres → Twilio SMS → n8n notifications/reports
 ```
 
-Twilio cannot reach `localhost`, because `localhost` means “this same machine.” From Twilio's perspective, `localhost` is Twilio's own server, not the founder's laptop. Also, the laptop is usually behind a home router/firewall and does not have a stable public HTTPS address.
+If the FastAPI app is deployed to a cloud host with a stable public HTTPS URL, **ngrok is not needed** for the live MVP. Twilio should point directly to the cloud endpoints:
 
-ngrok creates a public HTTPS tunnel to the local FastAPI server:
+```text
+Voice webhook:     https://<backend-domain>/webhooks/twilio/voice
+Messaging webhook: https://<backend-domain>/webhooks/twilio/sms
+Health check:      https://<backend-domain>/health
+```
+
+Uvicorn is the simple default server process for this MVP. A typical cloud start command is:
+
+```text
+uvicorn app.main:app --host 0.0.0.0 --port $PORT
+```
+
+During local development, FastAPI may still run on the founder's laptop at `http://localhost:8000`. Twilio cannot reach `localhost` directly. If testing local-only changes before deploying, ngrok can create a public HTTPS tunnel:
 
 ```text
 Twilio → https://abc123.ngrok-free.app/webhooks/twilio/voice
@@ -431,31 +448,24 @@ Twilio → https://abc123.ngrok-free.app/webhooks/twilio/voice
        → FastAPI route handler
 ```
 
-Local development can use:
-
-```text
-Twilio → ngrok → local Python/FastAPI backend
-```
-
-Before any real pilot, deploy a simple cloud backend:
-
-```text
-Twilio → hosted Python/FastAPI backend → Supabase Postgres → Twilio SMS → n8n notifications/reports
-```
-
-This needs to be a cloud service for real clients because Twilio requires stable public HTTPS webhooks. It does **not** need to be a distributed system. Avoid Kubernetes, microservices, event streaming, and complex queues during MVP.
+For real clients, use the cloud backend, not ngrok. This does **not** need to be a distributed system. Avoid Kubernetes, microservices, event streaming, and complex queues during MVP.
 
 ### 11.6 Database
 
-Use Supabase Postgres for MVP/prod. Minimum tables:
+Use Supabase Postgres for MVP/prod.
+
+Minimum pilot tables for the first 1-client build:
 
 - `clients`: Vigil customers, e.g. plumbing businesses
-- `client_phone_numbers`: Twilio aux numbers and contractor main numbers; useful once one client has multiple numbers
 - `leads`: customer callers/text senders for a client
-- `conversations`: one active SMS thread per client/lead/channel
 - `call_events`: every Twilio call webhook event
 - `messages`: inbound/outbound SMS records
 - `opt_outs`: client + phone number suppression list
+
+Add as soon as the workflow matures beyond the first supervised pilot:
+
+- `client_phone_numbers`: Twilio aux numbers and contractor main numbers; useful once one client has multiple numbers
+- `conversations`: one active SMS thread per client/lead/channel
 - `message_templates`: approved client-specific text templates
 - `decision_tree_versions`: versioned client-specific workflow definitions
 - `decision_tree_runs`: audit trail of which rule/tree produced which response
@@ -568,6 +578,9 @@ This gives each client tailored behavior without allowing arbitrary unsafe logic
 - **GoHighLevel** — White-label marketing-automation platform commonly used by small agencies pitching local businesses.
 - **Twilio aux number** — Vigil-controlled local phone number that receives conditionally forwarded missed calls, triggers webhooks, and sends/receives SMS.
 - **Conditional call forwarding** — Carrier/phone-system rule that forwards calls only when unanswered, busy, or unreachable, while leaving the contractor's public number unchanged.
+- **Webhook** — An HTTP endpoint that another service calls when an event happens; here, Twilio calls Vigil when a call or SMS hits the Twilio aux number.
+- **TwiML** — Twilio's XML instruction format for active voice calls, e.g. `<Response><Hangup/></Response>`.
+- **Uvicorn** — ASGI server process that runs the FastAPI app and listens for HTTP requests.
 - **n8n** — Workflow automation tool used for non-critical glue such as notifications, reporting, and syncs; not the source of truth.
 
 ---
@@ -577,6 +590,7 @@ This gives each client tailored behavior without allowing arbitrary unsafe logic
 These are unresolved and worth revisiting after the RAT:
 
 - **WhatsApp-only shops.** If a meaningful share of target prospects run intake entirely through WhatsApp or personal cell, the call-log audit becomes harder. Workaround exists (forwarded tracking number) but hasn't been tested.
+- **Carrier/phone-system forwarding friction.** Conditional forwarding has been validated on a Rogers iPhone, but setup is provider-specific. Keypad codes differ across mobile carriers, landlines, and VoIP systems; voicemail, iPhone Live Voicemail, call waiting, and business phone admin settings can interfere. Client-facing promise should be "guided 5–30 minute setup," not "universally instant keypad setup."
 - **The $15/recovered-job attribution method.** Define before pilot #1: is "recovered" any booking whose first touch came through the workflow, or only bookings where the customer wouldn't have called back otherwise? Pick one and write it into the contract. Ambiguity here is the most common attribution-dispute trigger.
 - **Concierge tier (human reply 7am–10pm).** Listed in original pricing tiers at $799/mo but operationally requires either the founder being on-call or hiring a contractor. Defer until at least 3 paying clients exist.
 - **Provincial regulation on automated SMS in Canada.** CASL (Canada's Anti-Spam Legislation) applies to commercial SMS. Confirm consent flow with each pilot before going live; existing customers who called the shop have implied consent for response, but stale-quote follow-ups beyond ~6 months may not.
