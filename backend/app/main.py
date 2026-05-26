@@ -21,7 +21,7 @@ async def twilio_voice_webhook(request: Request):
     print("To:", twilio_number)
     print("CallSid:", call_sid)
 
-    twiml = """<?xml version = "1.0" encoding"UTF-8"?>
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Hangup/>
 </Response>"""
