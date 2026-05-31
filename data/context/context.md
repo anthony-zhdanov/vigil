@@ -2,8 +2,8 @@
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
-> **Last updated:** 2026-05-26
-> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`. Twilio conditional forwarding has been technically validated on a Rogers iPhone; client onboarding remains provider/phone-system specific.
+> **Last updated:** 2026-05-30
+> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`. Twilio conditional forwarding, Twilio webhook routing, FastAPI hangup behavior, Supabase schema, and initial call-event logging have been technically validated. Client onboarding remains provider/phone-system specific.
 
 ---
 
@@ -313,7 +313,7 @@ Customer calls contractor's existing business number
 
 Key principle: to detect missed calls in real time, Vigil or an integrated provider must be in the call path. The lowest-risk approach is **conditional forwarding** rather than routing all calls through Vigil. This avoids changing the contractor's public number and reduces the chance of breaking live inbound calls.
 
-Technical validation note: conditional forwarding to a Twilio aux number has been validated on a Rogers iPhone. Rogers accepted no-answer forwarding (`*61*<TwilioNumber>#`), and the iPhone status check showed `Voice Call Forwarding When Unanswered` enabled. Exact setup still varies by provider and phone system.
+Technical validation note: conditional forwarding to a Twilio aux number has been validated on a Rogers iPhone. Rogers accepted no-answer forwarding (`*61*<TwilioNumber>#`), and the iPhone status check showed `Voice Call Forwarding When Unanswered` enabled. Exact setup still varies by provider and phone system. During testing, Twilio trial-account restrictions caused confusing behavior until the account was upgraded/paid; for realistic MVP testing, use a paid Twilio account.
 
 ### 11.3 Twilio number requirements
 
@@ -328,6 +328,8 @@ In the Twilio Console for the aux number:
 
 - Voice / “A call comes in”: `Webhook`, `POST`, `https://<backend-domain>/webhooks/twilio/voice`
 - Messaging / “A message comes in”: `Webhook`, `POST`, `https://<backend-domain>/webhooks/twilio/sms`
+
+Important Twilio configuration note: the voice webhook must be configured under **“A call comes in”**, not only under status callbacks. Status callbacks observe calls but do not control them. If Twilio appears to call the original/test number back, check for old TwiML Bins, Studio Flows, Functions, or `<Dial>` behavior still attached to the Twilio number. For the current MVP, the voice webhook should return `<Response><Hangup/></Response>`.
 
 ### 11.4 What the webhook workflow means, in plain language
 
@@ -452,7 +454,7 @@ For real clients, use the cloud backend, not ngrok. This does **not** need to be
 
 ### 11.6 Database
 
-Use Supabase Postgres for MVP/prod.
+Use Supabase Postgres for MVP/prod. The initial Supabase schema has been created.
 
 Minimum pilot tables for the first 1-client build:
 
@@ -564,6 +566,54 @@ Decision-tree actions should be explicit and limited. Initial action types:
 - `end_conversation`
 
 This gives each client tailored behavior without allowing arbitrary unsafe logic from the database.
+
+### 11.9 Current implementation state — as of 2026-05-30
+
+Current code path:
+
+```text
+/Users/anthonyzhdanov/Desktop/vigil/backend/app/main.py
+```
+
+Current backend behavior:
+
+- `GET /health` returns `{"status": "ok"}`.
+- `POST /webhooks/twilio/voice` reads Twilio form fields (`From`, `To`, `CallSid`, `CallStatus`), logs them, looks up the client by `clients.twilio_phone = To`, upserts a `leads` row for the caller, inserts a `call_events` row, and returns TwiML `<Response><Hangup/></Response>`.
+- If no client is found for the Twilio number, the backend still inserts an unknown `call_events` row with `client_id = null` and `lead_id = null`, then hangs up.
+- `POST /webhooks/twilio/sms` currently reads and prints inbound SMS fields (`From`, `To`, `Body`) and returns empty TwiML. It does **not yet** persist inbound SMS to Supabase.
+- The backend loads Supabase credentials from `backend/.env` using `python-dotenv` `dotenv_values`, not from global OS environment variables. Expected keys are `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; `SUPABASE_KEY` is currently accepted as a fallback. Service role key must remain backend-only and must never be committed.
+- `.gitignore` excludes `.env`, `/backend/.env`, `.env.*`, Python caches, and virtual environments.
+- Supabase Python client typing required runtime checks/casts because returned rows are typed as generic JSON. The code uses `dict[str, Any]`, `isinstance(..., dict)`, and `typing.cast` for client/lead rows.
+
+Validated locally:
+
+- FastAPI runs with Uvicorn from `backend` using `uvicorn app.main:app --reload`.
+- ngrok can expose the local app; `/health` and `/webhooks/twilio/voice` work through the ngrok HTTPS URL.
+- Twilio voice webhook pointed to ngrok successfully reaches FastAPI and receives hangup TwiML.
+- Rogers iPhone conditional forwarding to the Twilio number works.
+- Direct Twilio call and forwarded-call tests can reach the backend and hang up.
+- A local/manual voice webhook test successfully inserted a call event into Supabase.
+
+Current next development step:
+
+```text
+Voice webhook receives missed call
+  → log call in Supabase
+  → check opt_outs / duplicate suppression
+  → send recovery SMS through Twilio SDK
+  → insert outbound message in messages
+  → return Hangup TwiML
+```
+
+After that:
+
+```text
+Customer replies by SMS
+  → Twilio hits /webhooks/twilio/sms
+  → backend saves inbound message
+  → handles STOP/wrong-number opt-out cases
+  → notifies founder/owner
+```
 
 ## 12. Glossary
 
