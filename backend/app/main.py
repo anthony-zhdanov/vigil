@@ -7,6 +7,7 @@ from dotenv import dotenv_values
 from fastapi import FastAPI, Request, Response
 from supabase import Client, create_client
 from twilio.rest import Client as TwilioClient
+from twilio.request_validator import RequestValidator
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 env = dotenv_values(ENV_PATH)
@@ -26,6 +27,16 @@ TWILIO_ACCOUNT_SID = env_value("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = env_value("TWILIO_AUTH_TOKEN")
 DUPLICATE_SUPPRESSION_MINUTES = 60
 
+# Twilio webhook signature validation. On by default (secure); set
+# TWILIO_VALIDATE_SIGNATURE=false to disable for local curl testing.
+TWILIO_VALIDATE_SIGNATURE = (
+    env_value("TWILIO_VALIDATE_SIGNATURE") or "true"
+).strip().lower() not in {"false", "0", "no", "off"}
+# The public base URL Twilio calls (e.g. https://<sub>.ngrok-free.dev or your cloud
+# domain). The signature is computed over the exact public URL, which a proxy hides
+# from the app; set this for reliable validation. Falls back to X-Forwarded-* headers.
+PUBLIC_BASE_URL = env_value("PUBLIC_BASE_URL")
+
 supabase: Client | None = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -41,6 +52,41 @@ else:
     print(
         f"Twilio is not configured. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in {ENV_PATH}."
     )
+
+twilio_validator: RequestValidator | None = None
+if TWILIO_AUTH_TOKEN:
+    twilio_validator = RequestValidator(TWILIO_AUTH_TOKEN)
+
+
+def public_request_url(request: Request) -> str:
+    # Twilio signs the exact public URL it called. Behind ngrok / a cloud proxy the
+    # app only sees an internal http URL, so reconstruct the public one here.
+    path = request.url.path
+    query = f"?{request.url.query}" if request.url.query else ""
+    if PUBLIC_BASE_URL:
+        return f"{PUBLIC_BASE_URL.rstrip('/')}{path}{query}"
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
+    return f"{proto}://{host}{path}{query}"
+
+
+def twilio_signature_is_valid(request: Request, params: dict[str, str]) -> bool:
+    # Verify the X-Twilio-Signature header so only genuine Twilio requests are
+    # processed. Without this, anyone who learns the URL can forge missed-call
+    # webhooks and make us send SMS to arbitrary numbers (toll fraud / SMS pumping).
+    if not TWILIO_VALIDATE_SIGNATURE:
+        return True
+    if twilio_validator is None:
+        print(
+            "Twilio signature validation is enabled but TWILIO_AUTH_TOKEN is missing; rejecting."
+        )
+        return False
+    signature = request.headers.get("X-Twilio-Signature", "")
+    return twilio_validator.validate(public_request_url(request), params, signature)
 
 
 def end_call_twiml() -> Response:
@@ -345,6 +391,10 @@ async def twilio_voice_webhook(request: Request):
     form = await request.form()
     raw_payload = form_to_dict(form)
 
+    if not twilio_signature_is_valid(request, raw_payload):
+        print("Rejected Twilio voice webhook: invalid signature.")
+        return Response(status_code=403)
+
     caller = form_value(form, "From")
     twilio_number = form_value(form, "To")
     call_sid = form_value(form, "CallSid")
@@ -421,6 +471,10 @@ async def twilio_voice_webhook(request: Request):
 async def twilio_sms_webhook(request: Request):
     form = await request.form()
     raw_payload = form_to_dict(form)
+
+    if not twilio_signature_is_valid(request, raw_payload):
+        print("Rejected Twilio sms webhook: invalid signature.")
+        return Response(status_code=403)
 
     sender = form_value(form, "From")
     twilio_number = form_value(form, "To")
