@@ -2,8 +2,10 @@
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
-> **Last updated:** 2026-05-31
-> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`. Twilio conditional forwarding, Twilio webhook routing, FastAPI hangup behavior, Supabase schema, initial call-event logging, and a minimal V0 SMS text-back loop have been technically implemented. End-to-end SMS sending/reply testing through Twilio/ngrok or hosted backend remains the next validation step. Client onboarding remains provider/phone-system specific.
+> **Last updated:** 2026-06-02
+> **Status:** Pre-launch. RAT (Riskiest Assumption Test) not yet run. Project directory renamed to `vigil`; canonical context path is `/Users/anthonyzhdanov/Desktop/vigil/data/context/context.md`. Twilio conditional forwarding, Twilio webhook routing, FastAPI hangup behavior, Supabase schema, initial call-event logging, and a minimal V0 SMS text-back loop have been technically implemented. End-to-end SMS sending/reply testing through Twilio/ngrok or hosted backend remains the next validation step. Client onboarding remains provider/phone-system specific. On 2026-06-02, raw research materials contributed by Armaghan Ahmad (`army-15`, commit `armaghans raw big files`) were reconciled into this document — see the Source materials note below and §5.3.
+>
+> **Source materials.** This document synthesizes raw research now stored in `data/raw/`, contributed by Armaghan Ahmad (`army-15`): `AI Overview.pdf`, `MVP v2.pdf`, `MVP Services.pdf`, `Cold Outreach Plan.pdf`, and `GTA Plumbing Contacts Database.xlsx`. Where these raw materials and this synthesis conflict on underlying market/contact data, the raw materials are authoritative (e.g. §5.3 was reconciled to `Cold Outreach Plan.pdf`); this document remains authoritative for the strategy resolutions explicitly noted within it.
 
 ---
 
@@ -118,13 +120,15 @@ The Riskiest Assumption Test. Run in the next 14 days. Total spend ceiling: **$8
 
 **Phone calls first, in-person at supply-house counters second. Email last (or not at all).** Trades owners ignore cold email. Phone and in-person have meaningfully higher pickup and trust rates with this buyer.
 
-The 200-shop spreadsheet (`GTA_Plumbing_Contacts_Database.xlsx`) is the target list. Tier 1 first, then 2, then 3, and so on. Do not skip tiers — Tier 1 is the most likely to convert and validates the motion fastest.
+The 200-shop spreadsheet (`GTA Plumbing Contacts Database.xlsx`, in `data/raw/`) is the target list. Tier 1 first, then 2, then 3, and so on. Do not skip tiers — Tier 1 is the most likely to convert and validates the motion fastest.
 
 ### 5.3 Target market (from the contacts database)
 
-**Primary market (86 businesses):** 20–200 review counts, ≥4.7 Google rating, within 50km of Toronto, excluding Burlington, Grimsby, Dundas, Hamilton, Beamsville.
+**Primary market (86 businesses):** 20–200 review counts, >4.6 Google rating, within 50km of Toronto, excluding Burlington, Grimsby, Dundas, Hamilton, Beamsville.
 
-**Secondary market (114 businesses):** any review count, any rating, within 100km. Used only as fallback if primary market is exhausted before the test concludes.
+**Secondary market (109 businesses):** <20 or >200 review counts, any rating, within 100km. Used only as fallback if primary market is exhausted before the test concludes.
+
+> Source: reconciled to `Cold Outreach Plan.pdf` (army-15 raw materials), which is authoritative for these segment definitions and counts.
 
 ### 5.4 Prioritization tiers
 
@@ -566,6 +570,8 @@ Decision-tree actions should be explicit and limited. Initial action types:
 - `end_conversation`
 
 This gives each client tailored behavior without allowing arbitrary unsafe logic from the database.
+
+**Lead-lifecycle statuses (from `MVP Services.pdf`).** Separate from the fine-grained routing statuses set by the decision tree above (e.g. `emergency`, `needs_owner_call`, `no_response`), the raw spec defines a coarse sales-funnel taxonomy for the human-facing `leads` view: `New inquiry`, `Contacted`, `Appointment booked`, `Needs owner follow-up`, and `Not a fit / Do not contact again`. Use these as the lead's high-level lifecycle state; the routing statuses map up into them.
 
 ### 11.9 Current implementation state — as of 2026-05-31
 
