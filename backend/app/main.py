@@ -13,6 +13,7 @@ env = dotenv_values(ENV_PATH)
 
 app = FastAPI()
 
+
 def env_value(key: str) -> str | None:
     return os.getenv(key) or env.get(key)
 
@@ -42,9 +43,16 @@ else:
     )
 
 
-def hangup_twiml() -> Response:
+def end_call_twiml() -> Response:
+    # Answer, then hang up. The call arrives via carrier conditional forwarding,
+    # and carrier voicemail ANSWERS forwarded calls -- that's how the carrier knows
+    # the call was handled and stops ringing the client. <Reject> declines the call,
+    # so the carrier treats the forward as failed and keeps ringing the client.
+    # <Say> forces a clean answer (releasing the original leg); <Hangup> then ends
+    # the call. The recovery SMS does the real work.
     twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+    <Say voice="alice">Thanks for calling. We'll text you right back.</Say>
     <Hangup/>
 </Response>"""
     return Response(content=twiml, media_type="text/xml")
@@ -204,7 +212,9 @@ def is_opted_out(client_id: str, phone_number: str) -> bool:
     return bool(response.data)
 
 
-def create_opt_out(client_id: str, lead_id: str, phone_number: str, reason: str) -> None:
+def create_opt_out(
+    client_id: str, lead_id: str, phone_number: str, reason: str
+) -> None:
     if supabase is None:
         raise RuntimeError("Supabase is not configured")
 
@@ -348,12 +358,12 @@ async def twilio_voice_webhook(request: Request):
 
     if not caller or not twilio_number:
         print("Missing From or To in Twilio voice webhook; skipping database insert.")
-        return hangup_twiml()
+        return end_call_twiml()
 
     try:
         if supabase is None:
             print("Supabase not configured; skipping database insert.")
-            return hangup_twiml()
+            return end_call_twiml()
 
         client = find_client_by_twilio_number(twilio_number)
         if client is None:
@@ -369,7 +379,7 @@ async def twilio_voice_webhook(request: Request):
                 call_status=call_status,
                 raw_payload=raw_payload,
             )
-            return hangup_twiml()
+            return end_call_twiml()
 
         client_id = str(client["id"])
         lead = upsert_lead(client_id, caller)
@@ -404,7 +414,7 @@ async def twilio_voice_webhook(request: Request):
     except Exception as exc:
         print("Failed to log voice webhook in Supabase:", repr(exc))
 
-    return hangup_twiml()
+    return end_call_twiml()
 
 
 @app.post("/webhooks/twilio/sms")
