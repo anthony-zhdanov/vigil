@@ -81,7 +81,15 @@ def _extract_location(message_body: str, normalized: str, current_state: str) ->
 
 
 def _extract_job_type(message_body: str, normalized: str, current_state: str) -> str | None:
-    for job_type, keywords in JOB_TYPE_KEYWORDS.items():
+    priority_order = (
+        "water_heater",
+        "drain_or_sewer",
+        "fixture_or_install",
+        "quote_or_estimate",
+        "leak_or_pipe_repair",
+    )
+    for job_type in priority_order:
+        keywords = JOB_TYPE_KEYWORDS[job_type]
         if any(_contains(normalized, keyword) for keyword in keywords):
             return job_type
 
@@ -92,12 +100,11 @@ def _extract_job_type(message_body: str, normalized: str, current_state: str) ->
 
 
 def _extract_urgency(message_body: str, normalized: str, current_state: str) -> str | None:
-    for urgency, keywords in URGENCY_KEYWORDS.items():
+    priority_order = ("quote", "scheduled", "emergency", "today")
+    for urgency in priority_order:
+        keywords = URGENCY_KEYWORDS[urgency]
         if any(_contains(normalized, keyword) for keyword in keywords):
             return urgency
-
-    if current_state == "awaiting_urgency" and len(normalized) > 2:
-        return _clip(message_body, 80)
 
     return None
 

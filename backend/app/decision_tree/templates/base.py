@@ -39,6 +39,7 @@ DEFAULT_TEMPLATES = {
         "Location: {location}\n"
         "Service: {job_type}\n"
         "Urgency: {urgency}\n"
+        "Photo: {photo_status}\n"
         "Latest: {latest_message}\n"
         "Summary: {summary}"
     ),
@@ -57,6 +58,10 @@ def _clip(value: str, max_length: int = 240) -> str:
     if len(text) <= max_length:
         return text
     return f"{text[: max_length - 3].rstrip()}..."
+
+
+def _photo_status(collected_info: dict[str, Any]) -> str:
+    return "Received" if collected_info.get("photo_received") else "Not received"
 
 
 def render_template(
@@ -81,6 +86,7 @@ def render_template(
         location=_value(info.get("location")),
         job_type=_value(info.get("job_type")),
         urgency=_value(info.get("urgency")),
+        photo_status=_photo_status(info),
         latest_message=_clip(latest_message or ""),
         priority=priority.upper(),
         summary=_clip(rendered_summary or "No summary yet."),

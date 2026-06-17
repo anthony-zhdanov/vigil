@@ -16,7 +16,8 @@ def _merged_collected_info(
     if classifier_output.job_type:
         collected["job_type"] = classifier_output.job_type
     if classifier_output.urgency:
-        collected["urgency"] = classifier_output.urgency
+        if collected.get("urgency") != "emergency":
+            collected["urgency"] = classifier_output.urgency
     if classifier_output.summary:
         collected["latest_summary"] = classifier_output.summary
     return collected
@@ -143,10 +144,14 @@ def run_plumbing_decision_tree(
     actions: list[DecisionAction] = []
     urgency = next_info.get("urgency")
     priority = "urgent" if urgency == "emergency" else "normal"
+    emergency_already_notified = (
+        urgency == "emergency" and bool(next_info.get("emergency_notified"))
+    )
 
     if urgency == "emergency" and not next_info.get("emergency_notified"):
         actions.append(DecisionAction("notify_owner", notification_priority="urgent"))
         next_info["emergency_notified"] = True
+        emergency_already_notified = True
         if not next_info.get("location"):
             actions.extend(
                 [
@@ -218,7 +223,9 @@ def run_plumbing_decision_tree(
         )
 
     actions.append(DecisionAction("send_sms_template", template_key="handoff_to_team"))
-    if not any(action.type == "notify_owner" for action in actions):
+    if not any(action.type == "notify_owner" for action in actions) and not (
+        priority == "urgent" and emergency_already_notified
+    ):
         actions.append(DecisionAction("notify_owner", notification_priority=priority))
     actions.extend(
         [
