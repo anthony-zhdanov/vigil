@@ -1,4 +1,4 @@
-# Business Context — Missed-Call Recovery, Managed (Plumbing Wedge)
+# Business Context — (Company Name: Vigil) Missed-Call Recovery, Managed (Initial plumbing Wedge)
 
 > **Purpose of this document.** Single source of truth for the business. Designed to be pasted into a Claude Project, a custom GPT, or any future thread so the assistant has full context without re-deriving it. Supersedes prior `AI Overview` and `MVP v2` documents where they conflict — the resolutions are explicit below.
 >
@@ -9,21 +9,23 @@
 
 ## 1. Business at a glance
 
-**One-line description.** A managed lead-recovery service for independent plumbing shops in the Greater Toronto Area that turns their existing missed calls and stale quotes into booked jobs via SMS and email workflows, with a weekly dollarized report.
+**One-line description.** A managed lead-recovery service for contractors in the Greater Toronto Area that turns their existing missed calls and stale quotes into booked jobs via SMS and email workflows, with a weekly dollarized report.
 
-**Founder profile.** Solo, sales-led, no existing trades-owner network, ~20 hrs/week available, ~$150/month operating budget pre-revenue.
+**Founder profile.** Partnership. Founder 1 is technical, with a background in software development and AI. Founder 2 is sales-led pursuing a business degree. Some industry contractor connections can be leveraged but help is needed to determine how.
 
-**Geography.** Greater Toronto Area, sourced from a 50–100km radius around Toronto. Excludes Burlington, Grimsby, Dundas, Hamilton, and Beamsville from the primary target market.
+**Geography.** Starting initial clientele outreach via cold-outreach and connections in the GTA. Once a cohesive product is developed, online internet posting via reddit, twitter, and other social media is a potential way being considered to gain further traction.
 
-**Vertical.** Plumbing only at launch. HVAC reserved as fallback vertical if plumbing motion fails (see §9).
-
-**Verdict from pre-launch scoring.** TEST — score 67/100, high confidence. Demand is real and pricing is well-calibrated, but the market is saturated and the launch channel is unproven for this founder profile. The score is "test, don't build" — do not invest in tooling beyond free trials until the RAT passes.
+**Vertical.** Initial targeting towards plumbing at launch. Other contractors are also being considered going forward.
 
 ---
 
 ## 2. The service (MVP)
 
-The MVP is **SMS and email follow-up on missed calls and stale quotes pulled from the owner's existing system**. It does not include a live AI receptionist — that is explicitly Post-MVP and only sold after a customer is established (see §3). This is a deliberate departure from earlier drafts that bundled live call answering into the MVP.
+The MVP is **an SMS follow-up system on contractor's missed calls via a simple phone number forwarding setup**. 
+
+The product MVP idea is a custom built backend around a twilio phone number that fully handles customer interactions via SMS for contractors to help with missed call client retention.
+
+Contractors are guided through their provider's specific keypad initiation codes to set up missed call forwarding to our company phone number. Once they've set up the forwarding, any phone number pertaining to client calls that the contractor doesn't pick up is automatically sent a follow-up SMS prompting an SMS conversation asking for their reason for inquiry, the specifics of the job they need done, the location, the urgency, and a proactive message to the lead stating to send a photo of the job to be done.
 
 ### 2.1 Free 7-day audit (the door opener)
 
