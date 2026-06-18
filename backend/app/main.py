@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -29,12 +30,33 @@ def env_value(key: str) -> str | None:
     return os.getenv(key) or env.get(key)
 
 
+def env_flag(key: str, default: bool = False) -> bool:
+    value = env_value(key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def force_ipv4_dns_resolution() -> None:
+    original_getaddrinfo = socket.getaddrinfo
+
+    def getaddrinfo_ipv4_only(*args: Any, **kwargs: Any) -> Any:
+        return [
+            result
+            for result in original_getaddrinfo(*args, **kwargs)
+            if result[0] == socket.AF_INET
+        ]
+
+    socket.getaddrinfo = getaddrinfo_ipv4_only
+
+
 SUPABASE_URL = env_value("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = env_value("SUPABASE_SERVICE_ROLE_KEY") or env_value(
     "SUPABASE_KEY"
 )
 TWILIO_ACCOUNT_SID = env_value("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = env_value("TWILIO_AUTH_TOKEN")
+TWILIO_FORCE_IPV4 = env_flag("TWILIO_FORCE_IPV4")
 PUBLIC_BASE_URL = (
     env_value("PUBLIC_BASE_URL")
     or env_value("PUBLIC_WEBHOOK_BASE_URL")
@@ -64,6 +86,10 @@ if TWILIO_SIGNATURE_VALIDATION_DISABLED and TWILIO_VALIDATE_SIGNATURE:
     print(
         "TWILIO_VALIDATE_SIGNATURE=false ignored because runtime environment is not local/development/test."
     )
+
+if TWILIO_FORCE_IPV4:
+    force_ipv4_dns_resolution()
+    print("TWILIO_FORCE_IPV4 enabled; outbound HTTP DNS resolution is IPv4-only.")
 
 supabase: Client | None = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
@@ -257,8 +283,8 @@ async def twilio_voice_webhook(request: Request):
         print("Rejected Twilio voice webhook: invalid signature.")
         return Response(status_code=403)
 
-    caller = form_value(form, "From")
-    twilio_number = form_value(form, "To")
+    caller = form_value(form, "From") or form_value(form, "Caller")
+    twilio_number = form_value(form, "To") or form_value(form, "Called")
     call_sid = form_value(form, "CallSid")
     call_status = form_value(form, "CallStatus")
 
@@ -277,6 +303,7 @@ async def twilio_voice_webhook(request: Request):
     print("CallSid:", call_sid)
     print("CallStatus:", call_status)
 
+    webhook_processed = False
     try:
         result = process_missed_call(
             supabase,
@@ -292,11 +319,13 @@ async def twilio_voice_webhook(request: Request):
             print("Missed-call recovery SMS processed")
         else:
             print("Missed-call recovery skipped:", result.ignored_reason)
+        webhook_processed = True
 
     except Exception as exc:
         print("Failed to log voice webhook in Supabase:", repr(exc))
     finally:
-        mark_twilio_webhook_event_processed(webhook_event_id)
+        if webhook_processed:
+            mark_twilio_webhook_event_processed(webhook_event_id)
 
     return end_call_twiml()
 
@@ -337,6 +366,7 @@ async def twilio_sms_webhook(request: Request):
         mark_twilio_webhook_event_processed(webhook_event_id)
         return empty_twiml()
 
+    webhook_processed = False
     try:
         if supabase is None:
             print("Supabase not configured; skipping SMS database insert.")
@@ -359,11 +389,13 @@ async def twilio_sms_webhook(request: Request):
             print("Matched node:", result.matched_node_key)
         else:
             print("SMS workflow skipped:", result.ignored_reason)
+        webhook_processed = True
 
     except Exception as exc:
         print("Failed to process SMS webhook:", repr(exc))
     finally:
-        mark_twilio_webhook_event_processed(webhook_event_id)
+        if webhook_processed:
+            mark_twilio_webhook_event_processed(webhook_event_id)
 
     return empty_twiml()
 
@@ -389,6 +421,7 @@ async def twilio_status_webhook(request: Request):
         print("Duplicate Twilio status webhook suppressed.")
         return empty_twiml()
 
+    webhook_processed = False
     try:
         if not message_sid or not message_status:
             print("Missing MessageSid or MessageStatus in Twilio status webhook.")
@@ -400,10 +433,12 @@ async def twilio_status_webhook(request: Request):
 
         update_message_status_by_twilio_sid(message_sid, message_status)
         print("Twilio message status updated:", message_status)
+        webhook_processed = True
 
     except Exception as exc:
         print("Failed to process Twilio status webhook:", repr(exc))
     finally:
-        mark_twilio_webhook_event_processed(webhook_event_id)
+        if webhook_processed:
+            mark_twilio_webhook_event_processed(webhook_event_id)
 
     return empty_twiml()

@@ -61,7 +61,7 @@ def begin_webhook_event(
         request_hash=request_hash,
     )
     if existing is not None:
-        return existing, False
+        return existing, existing.get("processed_at") is None
 
     payload: Row = {
         "provider": provider,
@@ -99,4 +99,3 @@ def mark_webhook_event_processed(
         .execute()
     )
     return maybe_first_row(response, "webhook event")
-

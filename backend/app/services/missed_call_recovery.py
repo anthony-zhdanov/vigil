@@ -118,14 +118,6 @@ def process_missed_call(
     )
     lead_id = _row_id(lead, "lead")
 
-    conversation = conversations_repo.get_or_create_active_conversation(
-        supabase,
-        client_id=client_id,
-        lead_id=lead_id,
-        channel="sms",
-    )
-    conversation_id = _row_id(conversation, "conversation")
-
     call_event = call_events_repo.insert_call_event(
         supabase,
         client_id=client_id,
@@ -137,6 +129,14 @@ def process_missed_call(
         raw_payload=raw_payload,
     )
     call_event_id = _maybe_row_id(call_event, "call event")
+
+    conversation = conversations_repo.get_or_create_active_conversation(
+        supabase,
+        client_id=client_id,
+        lead_id=lead_id,
+        channel="sms",
+    )
+    conversation_id = _row_id(conversation, "conversation")
 
     if opt_outs_repo.is_opted_out(
         supabase, client_id=client_id, phone_number=from_phone

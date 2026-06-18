@@ -93,6 +93,69 @@ class TwilioWebhookTests(unittest.TestCase):
         self.assertEqual(calls["processed"], 1)
         self.assertEqual(calls["marked"], 1)
 
+    def test_voice_webhook_accepts_caller_called_aliases(self) -> None:
+        calls: dict[str, Any] = {"kwargs": [], "marked": 0}
+
+        def begin_event(
+            *, event_type: str, provider_event_id: str | None, raw_payload: dict[str, str]
+        ) -> tuple[str, bool]:
+            return "event-1", True
+
+        def process_voice(*args: Any, **kwargs: Any) -> Any:
+            calls["kwargs"].append(kwargs)
+            return SimpleNamespace(processed=True, ignored_reason=None)
+
+        main.begin_twilio_webhook_event = begin_event
+        main.mark_twilio_webhook_event_processed = (
+            lambda event_id: calls.__setitem__("marked", calls["marked"] + 1)
+        )
+        main.process_missed_call = process_voice
+
+        response = self.client.post(
+            "/webhooks/twilio/voice",
+            data={
+                "Caller": "+14165550100",
+                "Called": "+14165550200",
+                "CallSid": "CA123",
+                "CallStatus": "ringing",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls["kwargs"][0]["from_phone"], "+14165550100")
+        self.assertEqual(calls["kwargs"][0]["to_phone"], "+14165550200")
+        self.assertEqual(calls["marked"], 1)
+
+    def test_voice_webhook_exception_does_not_mark_event_processed(self) -> None:
+        calls: dict[str, Any] = {"marked": 0}
+
+        def begin_event(
+            *, event_type: str, provider_event_id: str | None, raw_payload: dict[str, str]
+        ) -> tuple[str, bool]:
+            return "event-1", True
+
+        def process_voice(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("service failed")
+
+        main.begin_twilio_webhook_event = begin_event
+        main.mark_twilio_webhook_event_processed = (
+            lambda event_id: calls.__setitem__("marked", calls["marked"] + 1)
+        )
+        main.process_missed_call = process_voice
+
+        response = self.client.post(
+            "/webhooks/twilio/voice",
+            data={
+                "From": "+14165550100",
+                "To": "+14165550200",
+                "CallSid": "CA123",
+                "CallStatus": "ringing",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls["marked"], 0)
+
     def test_duplicate_sms_webhook_does_not_duplicate_side_effects(self) -> None:
         calls: dict[str, Any] = {"begin": [], "processed": 0, "marked": 0}
 
