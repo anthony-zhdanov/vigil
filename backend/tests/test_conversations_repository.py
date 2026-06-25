@@ -115,7 +115,36 @@ class FakeSupabase:
 
 
 class ConversationRepositoryTests(unittest.TestCase):
-    def test_get_or_create_reopens_existing_closed_conversation(self) -> None:
+    def test_get_or_create_returns_existing_active_conversation(self) -> None:
+        db = FakeSupabase(
+            [
+                {
+                    "id": "conversation_1",
+                    "client_id": "client_1",
+                    "lead_id": "lead_1",
+                    "channel": "sms",
+                    "status": "waiting_for_customer",
+                    "current_state": "awaiting_location",
+                    "closed_at": None,
+                    "last_message_at": "2026-06-17T00:00:00+00:00",
+                    "collected_info": {"job_type": "drain_or_sewer"},
+                    "summary": "needs location",
+                }
+            ]
+        )
+
+        row = conversations.get_or_create_active_conversation(
+            db, client_id="client_1", lead_id="lead_1", channel="sms"
+        )
+
+        self.assertEqual(row["id"], "conversation_1")
+        self.assertEqual(row["status"], "waiting_for_customer")
+        self.assertEqual(row["current_state"], "awaiting_location")
+        self.assertEqual(row["collected_info"], {"job_type": "drain_or_sewer"})
+        self.assertEqual(len(db.conversations.inserts), 0)
+        self.assertEqual(len(db.conversations.updates), 0)
+
+    def test_get_or_create_creates_new_conversation_when_latest_is_closed(self) -> None:
         db = FakeSupabase(
             [
                 {
@@ -137,13 +166,16 @@ class ConversationRepositoryTests(unittest.TestCase):
             db, client_id="client_1", lead_id="lead_1", channel="sms"
         )
 
-        self.assertEqual(row["id"], "conversation_1")
+        self.assertEqual(row["id"], "conversation_2")
         self.assertEqual(row["status"], "open")
         self.assertEqual(row["current_state"], "awaiting_initial_reply")
-        self.assertIsNone(row["closed_at"])
         self.assertEqual(row["collected_info"], {})
-        self.assertEqual(len(db.conversations.inserts), 0)
-        self.assertEqual(len(db.conversations.updates), 1)
+        self.assertEqual(row["summary"], None)
+        self.assertEqual(db.conversations.rows[0]["status"], "closed")
+        self.assertEqual(db.conversations.rows[0]["current_state"], "closed")
+        self.assertEqual(db.conversations.rows[0]["collected_info"], {"location": "old"})
+        self.assertEqual(len(db.conversations.inserts), 1)
+        self.assertEqual(len(db.conversations.updates), 0)
 
 
 if __name__ == "__main__":

@@ -110,13 +110,42 @@ def process_missed_call(
         )
 
     client_id = _row_id(client, "client")
-    lead = leads_repo.upsert_lead(
-        supabase,
-        client_id=client_id,
-        phone_number=from_phone,
-        status="missed_call",
+    lead = leads_repo.get_lead_by_client_phone(supabase, client_id, from_phone)
+    lead_created = lead is None
+    lead_id = _maybe_row_id(lead, "lead") if lead is not None else None
+
+    opted_out = opt_outs_repo.is_opted_out(
+        supabase, client_id=client_id, phone_number=from_phone
     )
-    lead_id = _row_id(lead, "lead")
+    if opted_out:
+        call_event = call_events_repo.insert_call_event(
+            supabase,
+            client_id=client_id,
+            lead_id=lead_id,
+            from_phone=from_phone,
+            to_phone=to_phone,
+            call_sid=call_sid,
+            call_status=call_status,
+            raw_payload=raw_payload,
+        )
+        return MissedCallRecoveryResult(
+            processed=False,
+            ignored_reason="opted_out",
+            client_id=client_id,
+            lead_id=lead_id,
+            call_event_id=_maybe_row_id(call_event, "call event"),
+        )
+
+    if lead is None:
+        lead = leads_repo.upsert_lead(
+            supabase,
+            client_id=client_id,
+            phone_number=from_phone,
+            status="missed_call",
+        )
+        lead_id = _row_id(lead, "lead")
+    elif lead_id is None:
+        raise RuntimeError("lead row is missing id")
 
     call_event = call_events_repo.insert_call_event(
         supabase,
@@ -130,23 +159,19 @@ def process_missed_call(
     )
     call_event_id = _maybe_row_id(call_event, "call event")
 
-    conversation = conversations_repo.get_or_create_active_conversation(
+    active_conversation = conversations_repo.get_active_conversation(
         supabase,
         client_id=client_id,
         lead_id=lead_id,
         channel="sms",
     )
-    conversation_id = _row_id(conversation, "conversation")
-
-    if opt_outs_repo.is_opted_out(
-        supabase, client_id=client_id, phone_number=from_phone
-    ):
+    if active_conversation is not None:
         return MissedCallRecoveryResult(
             processed=False,
-            ignored_reason="opted_out",
+            ignored_reason="active_conversation_exists",
             client_id=client_id,
             lead_id=lead_id,
-            conversation_id=conversation_id,
+            conversation_id=_row_id(active_conversation, "conversation"),
             call_event_id=call_event_id,
         )
 
@@ -161,9 +186,47 @@ def process_missed_call(
             ignored_reason="recent_recovery_sms_exists",
             client_id=client_id,
             lead_id=lead_id,
-            conversation_id=conversation_id,
             call_event_id=call_event_id,
         )
+
+    if not lead_created:
+        lead = leads_repo.upsert_lead(
+            supabase,
+            client_id=client_id,
+            phone_number=from_phone,
+            status="missed_call",
+        )
+        lead_id = _row_id(lead, "lead")
+
+    try:
+        conversation = conversations_repo.create_conversation(
+            supabase,
+            client_id=client_id,
+            lead_id=lead_id,
+            channel="sms",
+            status="waiting_for_customer",
+            current_state="awaiting_initial_reply",
+            collected_info={},
+            summary="",
+        )
+    except Exception:
+        active_conversation = conversations_repo.get_active_conversation(
+            supabase,
+            client_id=client_id,
+            lead_id=lead_id,
+            channel="sms",
+        )
+        if active_conversation is None:
+            raise
+        return MissedCallRecoveryResult(
+            processed=False,
+            ignored_reason="active_conversation_exists",
+            client_id=client_id,
+            lead_id=lead_id,
+            conversation_id=_row_id(active_conversation, "conversation"),
+            call_event_id=call_event_id,
+        )
+    conversation_id = _row_id(conversation, "conversation")
 
     body = render_template(
         MISSED_CALL_TEMPLATE_KEY,

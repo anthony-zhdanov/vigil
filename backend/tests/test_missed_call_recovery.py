@@ -29,6 +29,8 @@ class MissedCallHarness:
         self,
         *,
         known_client: bool = True,
+        existing_lead: bool = False,
+        active_conversation: bool = False,
         existing_opt_out: bool = False,
         recent_recovery_sms: bool = False,
     ) -> None:
@@ -39,6 +41,8 @@ class MissedCallHarness:
         self.call_sid = "CA_IN_1"
         self.call_status = "no-answer"
         self.known_client = known_client
+        self.existing_lead = existing_lead
+        self.has_active_conversation = active_conversation
         self.existing_opt_out = existing_opt_out
         self.recent_recovery_sms = recent_recovery_sms
         self.client = {"id": "client_1", "business_name": "Acme Plumbing"}
@@ -53,13 +57,20 @@ class MissedCallHarness:
             "client_id": "client_1",
             "lead_id": "lead_1",
             "channel": "sms",
-            "status": "open",
-            "current_state": "awaiting_initial_reply",
-            "collected_info": {},
+            "status": "waiting_for_customer",
+            "current_state": "awaiting_location"
+            if active_conversation
+            else "awaiting_initial_reply",
+            "collected_info": {"job_type": "drain_or_sewer"}
+            if active_conversation
+            else {},
+            "closed_at": None if active_conversation else None,
         }
         self.client_lookups: list[dict[str, Any]] = []
+        self.lead_lookups: list[dict[str, Any]] = []
         self.lead_upserts: list[dict[str, Any]] = []
-        self.conversation_gets: list[dict[str, Any]] = []
+        self.active_conversation_gets: list[dict[str, Any]] = []
+        self.conversation_creates: list[dict[str, Any]] = []
         self.call_events: list[dict[str, Any]] = []
         self.opt_out_checks: list[dict[str, Any]] = []
         self.duplicate_checks: list[dict[str, Any]] = []
@@ -73,12 +84,20 @@ class MissedCallHarness:
                 side_effect=self.find_client_for_voice_number,
             ),
             patch(
+                "app.services.missed_call_recovery.leads_repo.get_lead_by_client_phone",
+                side_effect=self.get_lead_by_client_phone,
+            ),
+            patch(
                 "app.services.missed_call_recovery.leads_repo.upsert_lead",
                 side_effect=self.upsert_lead,
             ),
             patch(
-                "app.services.missed_call_recovery.conversations_repo.get_or_create_active_conversation",
-                side_effect=self.get_or_create_active_conversation,
+                "app.services.missed_call_recovery.conversations_repo.get_active_conversation",
+                side_effect=self.get_active_conversation,
+            ),
+            patch(
+                "app.services.missed_call_recovery.conversations_repo.create_conversation",
+                side_effect=self.create_conversation,
             ),
             patch(
                 "app.services.missed_call_recovery.call_events_repo.insert_call_event",
@@ -134,15 +153,32 @@ class MissedCallHarness:
             return None
         return self.client if twilio_number == self.twilio_number else None
 
+    def get_lead_by_client_phone(
+        self, supabase: Any, client_id: str, phone_number: str
+    ) -> dict[str, Any] | None:
+        self.lead_lookups.append(
+            {"client_id": client_id, "phone_number": phone_number}
+        )
+        if not self.existing_lead:
+            return None
+        return dict(self.lead)
+
     def upsert_lead(self, supabase: Any, **kwargs: Any) -> dict[str, Any]:
         self.lead_upserts.append(dict(kwargs))
         self.lead.update(kwargs)
         return dict(self.lead)
 
-    def get_or_create_active_conversation(
+    def get_active_conversation(
         self, supabase: Any, **kwargs: Any
-    ) -> dict[str, Any]:
-        self.conversation_gets.append(dict(kwargs))
+    ) -> dict[str, Any] | None:
+        self.active_conversation_gets.append(dict(kwargs))
+        if self.has_active_conversation:
+            return dict(self.conversation)
+        return None
+
+    def create_conversation(self, supabase: Any, **kwargs: Any) -> dict[str, Any]:
+        self.conversation_creates.append(dict(kwargs))
+        self.conversation.update(kwargs)
         return dict(self.conversation)
 
     def insert_call_event(self, supabase: Any, **kwargs: Any) -> dict[str, Any]:
@@ -198,6 +234,18 @@ class MissedCallRecoveryTests(unittest.TestCase):
         self.assertEqual(harness.call_events[0]["lead_id"], "lead_1")
         self.assertEqual(harness.call_events[0]["from_phone"], harness.customer_phone)
         self.assertEqual(harness.call_events[0]["to_phone"], harness.twilio_number)
+        self.assertEqual(
+            harness.conversation_creates[0],
+            {
+                "client_id": "client_1",
+                "lead_id": "lead_1",
+                "channel": "sms",
+                "status": "waiting_for_customer",
+                "current_state": "awaiting_initial_reply",
+                "collected_info": {},
+                "summary": "",
+            },
+        )
 
         outbound = harness.outbound_messages()[0]
         self.assertEqual(outbound["template_key"], "missed_call_initial")
@@ -233,7 +281,8 @@ class MissedCallRecoveryTests(unittest.TestCase):
         self.assertFalse(result.processed)
         self.assertEqual(result.ignored_reason, "unknown_twilio_number")
         self.assertEqual(len(harness.lead_upserts), 0)
-        self.assertEqual(len(harness.conversation_gets), 0)
+        self.assertEqual(len(harness.active_conversation_gets), 0)
+        self.assertEqual(len(harness.conversation_creates), 0)
         self.assertEqual(len(harness.twilio.sent_messages), 0)
         self.assertEqual(len(harness.messages), 0)
         self.assertEqual(harness.call_events[0]["client_id"], None)
@@ -251,9 +300,28 @@ class MissedCallRecoveryTests(unittest.TestCase):
         self.assertEqual(len(harness.twilio.sent_messages), 0)
         self.assertEqual(len(harness.messages), 0)
         self.assertEqual(len(harness.duplicate_checks), 0)
+        self.assertEqual(len(harness.conversation_creates), 0)
         self.assertEqual(len(harness.conversation_updates), 0)
         self.assertEqual(harness.opt_out_checks[0]["phone_number"], harness.customer_phone)
         self.assertEqual(harness.call_events[0]["client_id"], "client_1")
+
+    def test_active_conversation_preserves_state_without_restarting_intake(self) -> None:
+        harness = MissedCallHarness(existing_lead=True, active_conversation=True)
+
+        result = harness.process()
+
+        self.assertFalse(result.processed)
+        self.assertEqual(result.ignored_reason, "active_conversation_exists")
+        self.assertEqual(result.conversation_id, "conversation_1")
+        self.assertEqual(len(harness.lead_upserts), 0)
+        self.assertEqual(len(harness.duplicate_checks), 0)
+        self.assertEqual(len(harness.conversation_creates), 0)
+        self.assertEqual(len(harness.conversation_updates), 0)
+        self.assertEqual(len(harness.twilio.sent_messages), 0)
+        self.assertEqual(harness.conversation["current_state"], "awaiting_location")
+        self.assertEqual(
+            harness.conversation["collected_info"], {"job_type": "drain_or_sewer"}
+        )
 
     def test_duplicate_suppression_skips_recovery_sms(self) -> None:
         harness = MissedCallHarness(recent_recovery_sms=True)
@@ -264,6 +332,7 @@ class MissedCallRecoveryTests(unittest.TestCase):
         self.assertEqual(result.ignored_reason, "recent_recovery_sms_exists")
         self.assertEqual(len(harness.twilio.sent_messages), 0)
         self.assertEqual(len(harness.messages), 0)
+        self.assertEqual(len(harness.conversation_creates), 0)
         self.assertEqual(len(harness.conversation_updates), 0)
         self.assertEqual(
             harness.duplicate_checks[0],
@@ -273,6 +342,28 @@ class MissedCallRecoveryTests(unittest.TestCase):
                 "duplicate_suppression_minutes": 60,
             },
         )
+
+    def test_previous_caller_without_active_conversation_starts_new_intake(self) -> None:
+        harness = MissedCallHarness(existing_lead=True)
+
+        result = harness.process()
+
+        self.assertTrue(result.processed)
+        self.assertEqual(result.conversation_id, "conversation_1")
+        self.assertEqual(len(harness.conversation_creates), 1)
+        self.assertEqual(len(harness.conversation_updates), 1)
+        self.assertEqual(
+            harness.lead_upserts[-1],
+            {
+                "client_id": "client_1",
+                "phone_number": harness.customer_phone,
+                "status": "missed_call",
+            },
+        )
+        self.assertEqual(
+            harness.conversation_creates[0]["current_state"], "awaiting_initial_reply"
+        )
+        self.assertEqual(harness.conversation_creates[0]["collected_info"], {})
 
 
 if __name__ == "__main__":

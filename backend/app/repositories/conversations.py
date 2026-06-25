@@ -32,27 +32,6 @@ def get_active_conversation(
     return maybe_first_row(response, "conversation")
 
 
-def get_latest_conversation(
-    supabase: Client | None,
-    *,
-    client_id: str,
-    lead_id: str,
-    channel: str = "sms",
-) -> Row | None:
-    db = require_supabase(supabase)
-    response = (
-        db.table("conversations")
-        .select("*")
-        .eq("client_id", client_id)
-        .eq("lead_id", lead_id)
-        .eq("channel", channel)
-        .order("last_message_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    return maybe_first_row(response, "conversation")
-
-
 def create_conversation(
     supabase: Client | None,
     *,
@@ -98,27 +77,6 @@ def get_or_create_active_conversation(
     if existing is not None:
         return existing
 
-    latest = get_latest_conversation(
-        db, client_id=client_id, lead_id=lead_id, channel=channel
-    )
-    if latest is not None:
-        latest_id = latest.get("id")
-        if latest_id is None:
-            raise RuntimeError("conversation row is missing id")
-
-        reopened = update_conversation(
-            db,
-            conversation_id=str(latest_id),
-            status="open",
-            current_state="awaiting_initial_reply",
-            collected_info={},
-            summary="",
-            last_message_at=now_iso(),
-            closed_at=None,
-        )
-        if reopened is not None:
-            return reopened
-
     try:
         return create_conversation(
             db, client_id=client_id, lead_id=lead_id, channel=channel
@@ -129,11 +87,6 @@ def get_or_create_active_conversation(
         )
         if existing is not None:
             return existing
-        latest = get_latest_conversation(
-            db, client_id=client_id, lead_id=lead_id, channel=channel
-        )
-        if latest is not None:
-            return latest
         raise
 
 
