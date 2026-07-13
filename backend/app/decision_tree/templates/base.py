@@ -78,7 +78,9 @@ def render_template(
     template = DEFAULT_TEMPLATES[template_key]
     info = collected_info or {}
     business_name = _value(client.get("business_name"), "the team")
-    rendered_summary = summary or (classifier_output.summary if classifier_output else "")
+    rendered_summary = summary or (
+        classifier_output.summary if classifier_output else ""
+    )
 
     return template.format(
         business_name=business_name,
