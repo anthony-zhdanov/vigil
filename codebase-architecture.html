@@ -1,0 +1,1726 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vigil Codebase Architecture</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1d2530;
+      --muted: #657184;
+      --line: #d8dee8;
+      --paper: #f8fafc;
+      --panel: #ffffff;
+      --panel-strong: #eef4ff;
+      --blue: #295bdb;
+      --green: #1f7a57;
+      --orange: #a15c16;
+      --red: #a3343a;
+      --violet: #6750a4;
+      --shadow: 0 18px 60px rgba(30, 41, 59, 0.12);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, #edf4ff 0, #f8fafc 360px),
+        var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.58;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      padding: 0.1rem 0.28rem;
+      border: 1px solid #d7dfec;
+      border-radius: 5px;
+      background: #f3f6fb;
+      font-family: var(--mono);
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+
+    pre {
+      margin: 0;
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #101827;
+      color: #eaf0fb;
+      font-family: var(--mono);
+      font-size: 0.86rem;
+      line-height: 1.5;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th,
+    td {
+      padding: 0.72rem 0.8rem;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #34445a;
+      background: #f3f6fb;
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 1.2rem;
+      overflow-y: auto;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.4rem;
+    }
+
+    .mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border: 1px solid #aec2ef;
+      border-radius: 8px;
+      background: #e8efff;
+      color: var(--blue);
+      font-weight: 800;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 0.98rem;
+    }
+
+    .brand span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .nav-section {
+      margin: 1rem 0;
+    }
+
+    .nav-section h2 {
+      margin: 0 0 0.45rem;
+      color: #475569;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .sidebar a {
+      display: block;
+      padding: 0.38rem 0.48rem;
+      border-radius: 6px;
+      color: #2c3a4d;
+      font-size: 0.88rem;
+    }
+
+    .sidebar a:hover {
+      background: #eef4ff;
+      text-decoration: none;
+    }
+
+    .content {
+      min-width: 0;
+    }
+
+    .hero {
+      padding: 4rem clamp(1.25rem, 5vw, 4.5rem) 2rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.65rem;
+      color: var(--blue);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 980px;
+      margin: 0;
+      color: #0f172a;
+      font-size: clamp(2.2rem, 5vw, 4.8rem);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 920px;
+      margin: 1.35rem 0 0;
+      color: #46566b;
+      font-size: 1.08rem;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.8rem;
+      margin-top: 2rem;
+      max-width: 1080px;
+    }
+
+    .metric {
+      min-height: 112px;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      box-shadow: 0 8px 28px rgba(30, 41, 59, 0.07);
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 0.35rem;
+      color: #111827;
+      font-size: 1.2rem;
+      line-height: 1.25;
+    }
+
+    section {
+      padding: 2.4rem clamp(1.25rem, 5vw, 4.5rem);
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 1rem;
+      color: #111827;
+      font-size: clamp(1.5rem, 3vw, 2.35rem);
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 1.6rem 0 0.65rem;
+      color: #1f2937;
+      font-size: 1.12rem;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 1.2rem 0 0.45rem;
+      color: #34445a;
+      font-size: 0.92rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    p {
+      max-width: 980px;
+      margin: 0.6rem 0;
+    }
+
+    ul,
+    ol {
+      max-width: 1040px;
+      padding-left: 1.25rem;
+    }
+
+    li + li {
+      margin-top: 0.35rem;
+    }
+
+    .panel {
+      margin: 1rem 0;
+      padding: 1.15rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 8px 26px rgba(30, 41, 59, 0.05);
+    }
+
+    .panel.soft {
+      background: #f8fbff;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+
+    .stack {
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 0.75rem 0;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.55rem;
+      border: 1px solid #bfd0ea;
+      border-radius: 999px;
+      background: #f3f7ff;
+      color: #274064;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0.12rem 0.48rem;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .tag.green {
+      background: #e6f6ee;
+      color: var(--green);
+    }
+
+    .tag.orange {
+      background: #fff0dd;
+      color: var(--orange);
+    }
+
+    .tag.blue {
+      background: #e8efff;
+      color: var(--blue);
+    }
+
+    .tag.red {
+      background: #ffeaed;
+      color: var(--red);
+    }
+
+    .diagram {
+      display: grid;
+      gap: 0.9rem;
+      margin: 1.2rem 0;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(128px, 1fr));
+      gap: 0.7rem;
+      align-items: stretch;
+    }
+
+    .flow-box {
+      position: relative;
+      min-height: 116px;
+      padding: 0.9rem;
+      border: 1px solid #cdd8e8;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .flow-box::after {
+      content: "->";
+      position: absolute;
+      top: 50%;
+      right: -0.58rem;
+      transform: translateY(-50%);
+      color: #8aa0bd;
+      font-family: var(--mono);
+      font-weight: 800;
+    }
+
+    .flow-box:last-child::after {
+      content: "";
+    }
+
+    .flow-box strong {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: #102033;
+    }
+
+    .flow-box span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .lane-title {
+      color: #111827;
+      font-weight: 800;
+    }
+
+    .lane-body {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .box {
+      padding: 0.55rem 0.7rem;
+      border: 1px solid #cdd8e8;
+      border-radius: 7px;
+      background: #f8fbff;
+      font-size: 0.9rem;
+    }
+
+    .sequence {
+      counter-reset: step;
+      display: grid;
+      gap: 0.8rem;
+      margin: 1rem 0;
+    }
+
+    .step {
+      position: relative;
+      padding: 1rem 1rem 1rem 3.1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      display: grid;
+      width: 1.55rem;
+      height: 1.55rem;
+      place-items: center;
+      border-radius: 50%;
+      background: #e8efff;
+      color: var(--blue);
+      font-size: 0.78rem;
+      font-weight: 900;
+    }
+
+    .step strong {
+      display: block;
+      color: #172033;
+    }
+
+    .step p {
+      margin: 0.3rem 0 0;
+      color: #4b5870;
+    }
+
+    .matrix {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .callout {
+      padding: 1rem 1.05rem;
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #eef4ff;
+    }
+
+    .callout.warning {
+      border-left-color: var(--orange);
+      background: #fff5e8;
+    }
+
+    .callout strong {
+      color: #0f172a;
+    }
+
+    .file-tree {
+      display: grid;
+      gap: 0.35rem;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      overflow-x: auto;
+    }
+
+    .file-tree div {
+      white-space: nowrap;
+    }
+
+    .indent-1 {
+      padding-left: 1.4rem;
+    }
+
+    .indent-2 {
+      padding-left: 2.8rem;
+    }
+
+    .indent-3 {
+      padding-left: 4.2rem;
+    }
+
+    .state-machine {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 0.7rem;
+      align-items: center;
+      margin: 1rem 0;
+    }
+
+    .state {
+      min-height: 92px;
+      padding: 0.8rem;
+      border: 1px solid #cdd8e8;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .state strong {
+      display: block;
+      margin-bottom: 0.3rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      word-break: break-word;
+    }
+
+    .state span {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .state-arrow {
+      display: none;
+    }
+
+    .footnote {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .print-note {
+      display: none;
+    }
+
+    @media (max-width: 1060px) {
+      .layout {
+        display: block;
+      }
+
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .meta-grid,
+      .grid-2,
+      .grid-3,
+      .flow-row,
+      .state-machine {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-box::after {
+        content: "";
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+      }
+
+      .layout {
+        display: block;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      section,
+      .hero {
+        padding: 1.4rem 0;
+      }
+
+      .panel,
+      .flow-box,
+      .lane,
+      .step,
+      .metric {
+        box-shadow: none;
+      }
+
+      .print-note {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Page navigation">
+      <div class="brand">
+        <div class="mark">V</div>
+        <div>
+          <strong>Vigil</strong>
+          <span>Technical architecture map</span>
+        </div>
+      </div>
+      <div class="nav-section">
+        <h2>Start</h2>
+        <a href="#overview">Overview</a>
+        <a href="#repo-map">Repository Map</a>
+        <a href="#mental-model">Mental Model</a>
+      </div>
+      <div class="nav-section">
+        <h2>Runtime</h2>
+        <a href="#boot">Boot And Configuration</a>
+        <a href="#webhooks">Webhook Layer</a>
+        <a href="#voice-flow">Voice Flow</a>
+        <a href="#sms-flow">SMS Flow</a>
+        <a href="#status-flow">Status Callback Flow</a>
+      </div>
+      <div class="nav-section">
+        <h2>Internals</h2>
+        <a href="#decision-tree">Decision Tree</a>
+        <a href="#actions">Action Executor</a>
+        <a href="#repositories">Repositories</a>
+        <a href="#schema">Supabase Schema</a>
+        <a href="#cross-cutting">Cross-Cutting Concerns</a>
+      </div>
+      <div class="nav-section">
+        <h2>Reference</h2>
+        <a href="#module-matrix">Module Matrix</a>
+        <a href="#tests">Tests</a>
+        <a href="#gaps">Current Edges</a>
+        <a href="#glossary">Glossary</a>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="hero">
+        <p class="eyebrow">Ground-up codebase walkthrough</p>
+        <h1>How the Vigil backend turns missed calls into recoverable plumbing leads.</h1>
+        <p class="hero-copy">
+          This page explains the codebase as it exists in this repository: a Python/FastAPI backend that receives Twilio webhooks, stores operational records in Supabase, runs a deterministic plumbing SMS decision tree, sends approved SMS templates, and records enough audit trail to understand every automated decision.
+        </p>
+        <div class="meta-grid" aria-label="Project summary">
+          <div class="metric">
+            <span>Application</span>
+            <strong>FastAPI webhook backend</strong>
+          </div>
+          <div class="metric">
+            <span>Integrations</span>
+            <strong>Twilio + Supabase</strong>
+          </div>
+          <div class="metric">
+            <span>Workflow Brain</span>
+            <strong>Deterministic decision tree</strong>
+          </div>
+          <div class="metric">
+            <span>Primary Product Path</span>
+            <strong>Missed call -> SMS recovery -> owner handoff</strong>
+          </div>
+        </div>
+      </header>
+
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>
+          Vigil is a managed missed-call recovery service for plumbing shops. The codebase implements the backend piece of that service. Contractors conditionally forward unanswered calls to a Vigil-controlled Twilio number. Twilio notifies this backend. The backend identifies which contractor owns the Twilio number, records the event, sends a recovery SMS, processes the customer's SMS or MMS reply, asks for missing facts, and eventually alerts the owner with a structured lead summary.
+        </p>
+        <div class="diagram">
+          <div class="flow-row">
+            <div class="flow-box">
+              <strong>Customer</strong>
+              <span>Calls the contractor, then replies by SMS or MMS.</span>
+            </div>
+            <div class="flow-box">
+              <strong>Twilio</strong>
+              <span>Receives forwarded voice calls and inbound SMS payloads.</span>
+            </div>
+            <div class="flow-box">
+              <strong>FastAPI</strong>
+              <span>Validates, deduplicates, parses, and delegates webhooks.</span>
+            </div>
+            <div class="flow-box">
+              <strong>Workflow Services</strong>
+              <span>Coordinate leads, conversations, decision runs, and side effects.</span>
+            </div>
+            <div class="flow-box">
+              <strong>Supabase</strong>
+              <span>Persists clients, leads, messages, calls, opt-outs, media, and audits.</span>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>The most important design choice:</strong> the decision tree does not send texts or write data itself. It returns typed actions. The action executor turns those actions into Twilio sends and Supabase writes. That keeps routing logic auditable and prevents arbitrary generated prose or arbitrary code execution.
+        </div>
+      </section>
+
+      <section id="repo-map">
+        <h2>Repository Map</h2>
+        <p>
+          The repository is small and backend-heavy. The production code lives under <code>backend/app</code>, schema changes live under <code>supabase/migrations</code>, tests live under <code>backend/tests</code>, and product context lives under <code>data</code>.
+        </p>
+        <div class="file-tree" aria-label="Repository tree">
+          <div>vigil/</div>
+          <div class="indent-1">backend/</div>
+          <div class="indent-2">requirements.txt</div>
+          <div class="indent-2">app/</div>
+          <div class="indent-3">main.py</div>
+          <div class="indent-3">services/</div>
+          <div class="indent-3">repositories/</div>
+          <div class="indent-3">decision_tree/</div>
+          <div class="indent-2">tests/</div>
+          <div class="indent-1">supabase/</div>
+          <div class="indent-2">migrations/</div>
+          <div class="indent-1">data/</div>
+          <div class="indent-2">context/context.md</div>
+          <div class="indent-2">raw/*.md, *.pdf, *.png</div>
+          <div class="indent-1">codebase-architecture.html</div>
+        </div>
+
+        <div class="grid-3">
+          <div class="panel">
+            <h3>Runtime Code</h3>
+            <p>
+              <code>backend/app/main.py</code> owns app creation, environment loading, webhook routes, TwiML responses, Twilio signature validation, idempotency wrappers, and global clients.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Business Logic</h3>
+            <p>
+              <code>backend/app/services</code> owns workflow orchestration and side effects. This layer is where "what happens when a missed call or SMS arrives?" is answered.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Pure Routing Logic</h3>
+            <p>
+              <code>backend/app/decision_tree</code> owns classification, decision selection, action contracts, and approved SMS template rendering.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="mental-model">
+        <h2>Mental Model</h2>
+        <p>
+          Read the system as five layers. Each layer has a narrow job and hands structured data to the next layer.
+        </p>
+        <div class="stack">
+          <div class="lane">
+            <div class="lane-title">1. Network Boundary</div>
+            <div class="lane-body">
+              <span class="box">Twilio voice webhook</span>
+              <span class="box">Twilio SMS webhook</span>
+              <span class="box">Twilio status callback</span>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">2. HTTP Boundary</div>
+            <div class="lane-body">
+              <span class="box">FastAPI routes</span>
+              <span class="box">form parsing</span>
+              <span class="box">signature validation</span>
+              <span class="box">TwiML responses</span>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">3. Workflow Layer</div>
+            <div class="lane-body">
+              <span class="box">missed_call_recovery</span>
+              <span class="box">sms_workflow</span>
+              <span class="box">action_executor</span>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">4. Domain Brain</div>
+            <div class="lane-body">
+              <span class="box">classifier</span>
+              <span class="box">interpreter</span>
+              <span class="box">templates</span>
+              <span class="box">typed contracts</span>
+            </div>
+          </div>
+          <div class="lane">
+            <div class="lane-title">5. Persistence</div>
+            <div class="lane-body">
+              <span class="box">clients</span>
+              <span class="box">leads</span>
+              <span class="box">conversations</span>
+              <span class="box">messages</span>
+              <span class="box">call_events</span>
+              <span class="box">decision_tree_runs</span>
+              <span class="box">owner_notifications</span>
+              <span class="box">webhook_events</span>
+            </div>
+          </div>
+        </div>
+        <p>
+          The data flow is intentionally unidirectional during request handling: route -> service -> repositories and decision tree -> action executor -> repositories/Twilio. Repository modules do not call services. The decision tree does not call repositories. The route layer does not contain the detailed lead-recovery algorithm.
+        </p>
+      </section>
+
+      <section id="boot">
+        <h2>Boot And Configuration</h2>
+        <p>
+          <code>backend/app/main.py</code> is loaded when the ASGI server imports <code>app.main:app</code>. At import time it reads environment configuration, creates integration clients if credentials are present, and configures security behavior.
+        </p>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Environment Sources</h3>
+            <p>
+              The helper <code>env_value()</code> checks real process environment first, then falls back to <code>backend/.env</code> loaded through <code>python-dotenv</code>.
+            </p>
+            <div class="pill-row">
+              <span class="pill">SUPABASE_URL</span>
+              <span class="pill">SUPABASE_SERVICE_ROLE_KEY</span>
+              <span class="pill">TWILIO_ACCOUNT_SID</span>
+              <span class="pill">TWILIO_AUTH_TOKEN</span>
+              <span class="pill">PUBLIC_BASE_URL</span>
+              <span class="pill">TWILIO_STATUS_CALLBACK_URL</span>
+              <span class="pill">APP_ENV</span>
+              <span class="pill">TWILIO_VALIDATE_SIGNATURE</span>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Global Runtime Objects</h3>
+            <p>
+              If Supabase credentials exist, <code>create_client()</code> creates <code>supabase</code>. If Twilio credentials exist, <code>TwilioClient()</code> creates <code>twilio_client</code>. If the Twilio auth token exists, <code>RequestValidator</code> creates <code>twilio_validator</code>.
+            </p>
+            <p>
+              Missing credentials do not crash import. They print configuration warnings and routes later skip work or raise where a send is required.
+            </p>
+          </div>
+        </div>
+        <div class="callout warning">
+          <strong>Signature validation switch:</strong> <code>TWILIO_VALIDATE_SIGNATURE=false</code> only disables validation in local/development/test-like environments. In production-like environments, the code ignores that disable flag and keeps validation enabled.
+        </div>
+      </section>
+
+      <section id="webhooks">
+        <h2>Webhook Layer</h2>
+        <p>
+          The backend exposes four HTTP routes. One is health-only; three are Twilio entry points.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Route</th>
+                <th>Caller</th>
+                <th>Main Job</th>
+                <th>Response</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>GET /health</code></td>
+                <td>Uptime checks</td>
+                <td>Returns a simple readiness marker.</td>
+                <td><code>{"status":"ok"}</code></td>
+              </tr>
+              <tr>
+                <td><code>POST /webhooks/twilio/voice</code></td>
+                <td>Twilio voice</td>
+                <td>Handle forwarded missed calls and trigger initial recovery SMS.</td>
+                <td>Answer-and-hangup TwiML</td>
+              </tr>
+              <tr>
+                <td><code>POST /webhooks/twilio/sms</code></td>
+                <td>Twilio messaging</td>
+                <td>Handle customer replies, run the decision tree, and execute actions.</td>
+                <td>Empty TwiML</td>
+              </tr>
+              <tr>
+                <td><code>POST /webhooks/twilio/status</code></td>
+                <td>Twilio messaging status</td>
+                <td>Update message delivery status by Twilio SID.</td>
+                <td>Empty TwiML</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Shared Route Mechanics</h3>
+        <div class="sequence">
+          <div class="step">
+            <strong>Parse form data.</strong>
+            <p>Twilio sends form-encoded payloads. <code>form_to_dict()</code> converts FastAPI's form object into a plain <code>dict[str, str]</code>. <code>form_value()</code> pulls known fields safely.</p>
+          </div>
+          <div class="step">
+            <strong>Validate the Twilio signature.</strong>
+            <p><code>twilio_signature_is_valid()</code> reconstructs the public URL and asks Twilio's <code>RequestValidator</code> to validate <code>X-Twilio-Signature</code>. <code>public_request_url()</code> respects <code>PUBLIC_BASE_URL</code>, forwarded headers, and request URL details.</p>
+          </div>
+          <div class="step">
+            <strong>Begin an idempotency event.</strong>
+            <p><code>begin_twilio_webhook_event()</code> stores or checks <code>webhook_events</code> when Supabase and that repository are available. If persistent idempotency fails, it falls back to a process-local set.</p>
+          </div>
+          <div class="step">
+            <strong>Delegate to workflow code.</strong>
+            <p>The route calls <code>process_missed_call()</code>, <code>process_inbound_sms()</code>, or <code>update_message_status_by_twilio_sid()</code>.</p>
+          </div>
+          <div class="step">
+            <strong>Mark processed and return TwiML.</strong>
+            <p><code>mark_twilio_webhook_event_processed()</code> records completion when possible. Routes return XML TwiML even when the backend skips work, because Twilio needs a clean response.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="voice-flow">
+        <h2>Voice Flow</h2>
+        <p>
+          A voice webhook represents the missed-call recovery trigger. The route itself stays thin after parsing, validation, and idempotency. The service <code>process_missed_call()</code> owns the behavior.
+        </p>
+        <div class="sequence">
+          <div class="step">
+            <strong>Twilio sends <code>From</code>, <code>To</code>, <code>CallSid</code>, and <code>CallStatus</code>.</strong>
+            <p><code>From</code> is the caller/customer. <code>To</code> is the Vigil Twilio auxiliary number. <code>CallSid</code> is used as the provider event ID.</p>
+          </div>
+          <div class="step">
+            <strong>The route suppresses duplicate webhook deliveries.</strong>
+            <p>The event type is <code>voice:{CallStatus}</code>. A duplicate returns the same answer-and-hangup TwiML without re-running recovery side effects.</p>
+          </div>
+          <div class="step">
+            <strong>The service identifies the client by the Twilio number.</strong>
+            <p><code>clients_repo.find_client_for_voice_number()</code> first checks <code>client_phone_numbers</code> with <code>voice_enabled=true</code> and <code>active=true</code>. It can fall back to legacy <code>clients.twilio_phone</code>.</p>
+          </div>
+          <div class="step">
+            <strong>If the number is unknown, the call is logged but no customer SMS is sent.</strong>
+            <p>The service inserts a <code>call_events</code> row with nullable client and lead IDs, then returns <code>processed=false</code> with <code>unknown_twilio_number</code>.</p>
+          </div>
+          <div class="step">
+            <strong>Known clients get a lead and active SMS conversation.</strong>
+            <p><code>leads_repo.upsert_lead()</code> upserts by <code>(client_id, phone_number)</code>. <code>conversations_repo.get_or_create_active_conversation()</code> ensures there is one non-closed SMS conversation.</p>
+          </div>
+          <div class="step">
+            <strong>The call event is stored before suppression decisions.</strong>
+            <p>This preserves observability even if the caller is opted out or recently texted.</p>
+          </div>
+          <div class="step">
+            <strong>Opt-out and duplicate suppression prevent unwanted text.</strong>
+            <p><code>opt_outs_repo.is_opted_out()</code> blocks opted-out numbers. <code>messages_repo.recent_recovery_sms_exists()</code> blocks repeated <code>missed_call_initial</code> sends within 60 minutes.</p>
+          </div>
+          <div class="step">
+            <strong>The initial recovery SMS is rendered and sent.</strong>
+            <p><code>render_template("missed_call_initial")</code> includes the business name. The SMS is sent from the webhook <code>To</code> number to the caller's <code>From</code> number.</p>
+          </div>
+          <div class="step">
+            <strong>The outbound message and conversation state are persisted.</strong>
+            <p>The service inserts an outbound <code>messages</code> row and updates the conversation to <code>waiting_for_customer</code> / <code>awaiting_initial_reply</code>.</p>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>Why the voice route answers and hangs up:</strong> the TwiML says a short line and then hangs up. The comment in <code>main.py</code> explains that answering the forwarded leg lets the carrier stop ringing the original client phone, whereas rejecting the call can be treated as forwarding failure.
+        </div>
+      </section>
+
+      <section id="sms-flow">
+        <h2>SMS Flow</h2>
+        <p>
+          SMS is the richer workflow. Every inbound customer reply is logged, classified, audited, transformed into explicit actions, and used to update persistent conversation state.
+        </p>
+        <div class="sequence">
+          <div class="step">
+            <strong>Twilio sends customer reply fields.</strong>
+            <p>The route reads <code>From</code>, <code>To</code>, <code>Body</code>, <code>MessageSid</code>, and MMS fields like <code>NumMedia</code>, <code>MediaUrl0</code>, and <code>MediaContentType0</code>.</p>
+          </div>
+          <div class="step">
+            <strong>Media metadata is parsed before service delegation.</strong>
+            <p><code>parse_inbound_media()</code> accepts <code>NumMedia</code> but also scans actual <code>MediaUrlN</code> keys, so it is resilient to payloads with inconsistent media count fields.</p>
+          </div>
+          <div class="step">
+            <strong>Inbound SMS idempotency uses <code>MessageSid</code>.</strong>
+            <p>The event type is <code>sms:inbound</code>. Duplicate webhooks return empty TwiML and do not insert duplicate messages or send duplicate replies.</p>
+          </div>
+          <div class="step">
+            <strong>The service validates basic requirements.</strong>
+            <p><code>process_inbound_sms()</code> skips if <code>from_phone</code> or <code>to_phone</code> is missing, or if Supabase is not configured.</p>
+          </div>
+          <div class="step">
+            <strong>The client is resolved through SMS-enabled phone mapping.</strong>
+            <p><code>clients_repo.find_client_for_sms_number()</code> checks <code>client_phone_numbers</code> with <code>sms_enabled=true</code> and active status, with a legacy fallback.</p>
+          </div>
+          <div class="step">
+            <strong>The lead and conversation are loaded or created.</strong>
+            <p>The lead status is set to <code>sms_reply</code>. The conversation supplies the current state and previously collected facts.</p>
+          </div>
+          <div class="step">
+            <strong>The inbound message and media records are inserted.</strong>
+            <p>The inbound <code>messages</code> row stores direction, phones, body, Twilio SID, status <code>received</code>, raw payload, and conversation ID. Each attachment gets a <code>message_media</code> row.</p>
+          </div>
+          <div class="step">
+            <strong>Conversation facts are prepared.</strong>
+            <p><code>collected_info</code> starts from the persisted conversation. If any media is present, <code>photo_received=true</code> is added before the decision tree runs.</p>
+          </div>
+          <div class="step">
+            <strong>The plumbing decision tree runs.</strong>
+            <p><code>run_plumbing_decision_tree()</code> takes the message body, current conversation state, and collected facts. It returns <code>DecisionResult</code> with a matched node, actions, next state, status, facts, and summary.</p>
+          </div>
+          <div class="step">
+            <strong>The decision is audited.</strong>
+            <p><code>decision_tree_runs_repo.insert_decision_tree_run()</code> stores the tree key/version, classifier output, matched node key, action JSON, result status, and inbound message ID.</p>
+          </div>
+          <div class="step">
+            <strong>Actions are executed in order.</strong>
+            <p><code>execute_actions()</code> renders approved templates, sends SMS, updates leads, creates opt-outs, notifies owners, and closes conversations as directed by the typed actions.</p>
+          </div>
+          <div class="step">
+            <strong>The conversation is updated with the decision result.</strong>
+            <p>The final update writes <code>status</code>, <code>current_state</code>, <code>collected_info</code>, <code>summary</code>, <code>last_message_at</code>, and <code>closed_at</code> when the result is closed.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="status-flow">
+        <h2>Status Callback Flow</h2>
+        <p>
+          Outbound Twilio sends can include a status callback URL. The route <code>POST /webhooks/twilio/status</code> receives delivery updates and keeps <code>messages.status</code> current.
+        </p>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Callback URL Resolution</h3>
+            <p>
+              <code>twilio_status_callback_url()</code> prefers <code>TWILIO_STATUS_CALLBACK_URL</code>. If not set, it builds <code>{PUBLIC_BASE_URL}/webhooks/twilio/status</code>. If neither exists, sends omit the callback.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Status Update</h3>
+            <p>
+              The status route reads <code>MessageSid</code> and either <code>MessageStatus</code> or <code>SmsStatus</code>, deduplicates by <code>sms:status:{status}</code>, and calls <code>messages_repo.update_message_status()</code>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="decision-tree">
+        <h2>Decision Tree</h2>
+        <p>
+          The decision tree package is the deterministic workflow brain. It turns a customer message into structured classification, then into safe actions. It never talks to Twilio or Supabase.
+        </p>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Contract Objects</h3>
+            <p>
+              <code>contract.py</code> defines the vocabulary shared between the tree and executor.
+            </p>
+            <ul>
+              <li><code>ClassifierOutput</code>: intent, confidence, summary, urgency, job type, location, lead signal, reason.</li>
+              <li><code>DecisionAction</code>: action type plus action-specific fields like template key, lead status, opt-out reason, or notification priority.</li>
+              <li><code>DecisionResult</code>: tree identity, classifier output, matched node, actions, next conversation state/status, collected facts, and summary.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Base Tree Vocabulary</h3>
+            <p>
+              <code>trees/base/plumbing_default.py</code> stores the current tree key <code>plumbing_missed_call_recovery</code>, version <code>2026-06-05</code>, required facts, opt-out phrases, wrong-number phrases, job keywords, urgency keywords, and GTA location hints.
+            </p>
+          </div>
+        </div>
+
+        <h3>Classifier</h3>
+        <p>
+          <code>classify_plumbing_sms()</code> is regex and keyword based. It normalizes text, checks special intents first, extracts location/job/urgency facts, and returns <code>unclear</code> only when no route can be matched.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Detection</th>
+                <th>How It Works</th>
+                <th>Output Effect</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Opt-out</td>
+                <td>Exact words like <code>STOP</code> or phrases like "do not text".</td>
+                <td><code>intent="opt_out"</code>, high confidence, no lead signal.</td>
+              </tr>
+              <tr>
+                <td>Wrong number</td>
+                <td>Phrases like "wrong number" or "you have the wrong".</td>
+                <td><code>intent="wrong_number"</code>.</td>
+              </tr>
+              <tr>
+                <td>No longer needed</td>
+                <td>Exact or phrase matches like "already fixed" and "no longer need".</td>
+                <td><code>intent="no_longer_needed"</code>.</td>
+              </tr>
+              <tr>
+                <td>Location</td>
+                <td>Street address regex, Canadian postal code regex, "near/around/at" pattern, GTA city names, or free text while awaiting location.</td>
+                <td>Fills <code>location</code>.</td>
+              </tr>
+              <tr>
+                <td>Job type</td>
+                <td>Keyword groups for leak/pipe, drain/sewer, water heater, fixture/install, and quote/estimate.</td>
+                <td>Fills <code>job_type</code>.</td>
+              </tr>
+              <tr>
+                <td>Urgency</td>
+                <td>Keyword groups for quote, scheduled, emergency, and today. The current priority order is quote -> scheduled -> emergency -> today.</td>
+                <td>Fills <code>urgency</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Interpreter</h3>
+        <p>
+          <code>run_plumbing_decision_tree()</code> merges any newly extracted facts into <code>collected_info</code>, preserves emergency urgency from being downgraded by later replies, creates a summary, and chooses a matched node.
+        </p>
+        <div class="state-machine" aria-label="Conversation states">
+          <div class="state">
+            <strong>awaiting_initial_reply</strong>
+            <span>Default state after missed-call SMS.</span>
+          </div>
+          <div class="state">
+            <strong>awaiting_location</strong>
+            <span>Customer has signaled interest but no location is known.</span>
+          </div>
+          <div class="state">
+            <strong>awaiting_job_type</strong>
+            <span>Location is known, but service category is missing.</span>
+          </div>
+          <div class="state">
+            <strong>awaiting_urgency</strong>
+            <span>Location and job type are known, but timing is missing.</span>
+          </div>
+          <div class="state">
+            <strong>closed</strong>
+            <span>Opt-out, lost, wrong number, or handoff complete.</span>
+          </div>
+        </div>
+
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Matched Node</th>
+                <th>Condition</th>
+                <th>Actions</th>
+                <th>Next State</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>opt_out</code></td>
+                <td>Classifier intent is opt-out.</td>
+                <td>Confirm, create opt-out, mark lead opted out, close.</td>
+                <td><code>closed</code></td>
+              </tr>
+              <tr>
+                <td><code>wrong_number</code></td>
+                <td>Classifier intent is wrong number.</td>
+                <td>Confirm, create wrong-number opt-out, mark lead, close.</td>
+                <td><code>closed</code></td>
+              </tr>
+              <tr>
+                <td><code>no_longer_needed</code></td>
+                <td>Customer says they are all set.</td>
+                <td>Send close-out text, mark lead lost, close.</td>
+                <td><code>closed</code></td>
+              </tr>
+              <tr>
+                <td><code>fallback_unclear</code></td>
+                <td>Initial reply is unclear.</td>
+                <td>Ask for clarification, mark lead needs clarification.</td>
+                <td><code>awaiting_initial_reply</code></td>
+              </tr>
+              <tr>
+                <td><code>emergency_collect_location</code></td>
+                <td>Emergency detected but location missing and owner not already notified.</td>
+                <td>Notify owner urgent, acknowledge emergency, mark emergency.</td>
+                <td><code>awaiting_location</code></td>
+              </tr>
+              <tr>
+                <td><code>collect_location</code></td>
+                <td>Location is missing.</td>
+                <td>Request location, mark lead needs location or emergency.</td>
+                <td><code>awaiting_location</code></td>
+              </tr>
+              <tr>
+                <td><code>collect_job_type</code></td>
+                <td>Location exists but job type is missing.</td>
+                <td>Request job type, mark lead needs job type or emergency.</td>
+                <td><code>awaiting_job_type</code></td>
+              </tr>
+              <tr>
+                <td><code>collect_urgency</code></td>
+                <td>Location and job type exist but urgency is missing.</td>
+                <td>Request urgency, mark lead needs urgency.</td>
+                <td><code>awaiting_urgency</code></td>
+              </tr>
+              <tr>
+                <td><code>lead_complete_handoff</code></td>
+                <td>Required facts are known.</td>
+                <td>Confirm handoff, notify owner unless already handled, mark lead, close.</td>
+                <td><code>closed</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Template Renderer</h3>
+        <p>
+          <code>templates/base.py</code> stores approved copy in <code>DEFAULT_TEMPLATES</code>. <code>render_template()</code> formats copy with business name, lead phone, collected facts, photo status, priority, latest message, and summary. Missing values become readable fallbacks like <code>Unknown</code> rather than leaking braces to the customer.
+        </p>
+      </section>
+
+      <section id="actions">
+        <h2>Action Executor</h2>
+        <p>
+          <code>services/action_executor.py</code> is the bridge between pure decisions and external side effects. It loops through <code>DecisionResult.actions</code> in order and dispatches by action type.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Action Type</th>
+                <th>Executor Function</th>
+                <th>Side Effects</th>
+                <th>Failure Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>send_sms_template</code></td>
+                <td><code>_execute_send_sms_template()</code></td>
+                <td>Renders approved template, checks opt-out, sends customer SMS, inserts outbound message.</td>
+                <td>Twilio send exceptions are caught; message row is inserted with <code>failed</code>. Opt-outs create <code>suppressed_opt_out</code> message rows.</td>
+              </tr>
+              <tr>
+                <td><code>mark_lead_status</code></td>
+                <td><code>_execute_mark_lead_status()</code></td>
+                <td>Updates <code>leads.status</code>, <code>updated_at</code>, and optional summary.</td>
+                <td>Missing <code>lead_status</code> raises <code>ValueError</code>.</td>
+              </tr>
+              <tr>
+                <td><code>create_opt_out</code></td>
+                <td><code>_execute_create_opt_out()</code></td>
+                <td>Creates idempotent opt-out row with reason and source.</td>
+                <td>Repository retries by reading existing row on insert conflict.</td>
+              </tr>
+              <tr>
+                <td><code>notify_owner</code></td>
+                <td><code>_execute_notify_owner()</code></td>
+                <td>Renders owner summary, sends SMS to <code>clients.owner_phone</code>, inserts owner notification row.</td>
+                <td>Missing owner phone, owner phone matching customer, or Twilio failure creates a <code>failed</code> notification row.</td>
+              </tr>
+              <tr>
+                <td><code>close_conversation</code></td>
+                <td><code>_execute_close_conversation()</code></td>
+                <td>Calls repository close helper, setting status/state/closed time and preserving final info.</td>
+                <td>Repository errors propagate.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <strong>Important subtlety:</strong> the SMS workflow also performs a final <code>update_conversation()</code> after actions execute. That means a <code>close_conversation</code> action closes immediately, and the final update then writes the same final status/state/summary from the <code>DecisionResult</code>.
+        </div>
+      </section>
+
+      <section id="repositories">
+        <h2>Repositories</h2>
+        <p>
+          Repository modules are thin wrappers around Supabase table operations. They centralize row coercion, required Supabase configuration, and query details so services do not build raw Supabase chains everywhere.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Repository</th>
+                <th>Tables</th>
+                <th>Core Responsibility</th>
+                <th>Used By</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>_shared.py</code></td>
+                <td>None</td>
+                <td>Require configured Supabase, extract response data, coerce rows, parse datetimes, create UTC timestamps.</td>
+                <td>All repositories</td>
+              </tr>
+              <tr>
+                <td><code>clients.py</code></td>
+                <td><code>clients</code>, <code>client_phone_numbers</code></td>
+                <td>Find clients by Twilio number with voice/SMS enabled filters and legacy fallback.</td>
+                <td>Voice and SMS services</td>
+              </tr>
+              <tr>
+                <td><code>leads.py</code></td>
+                <td><code>leads</code></td>
+                <td>Get or upsert a lead by client and phone, update lead status and summary.</td>
+                <td>Voice service, SMS service, action executor</td>
+              </tr>
+              <tr>
+                <td><code>conversations.py</code></td>
+                <td><code>conversations</code></td>
+                <td>Find one active conversation, create conversation, update state/status/facts, close conversation.</td>
+                <td>Voice service, SMS service, action executor</td>
+              </tr>
+              <tr>
+                <td><code>messages.py</code></td>
+                <td><code>messages</code></td>
+                <td>Insert inbound/outbound messages, find/update by Twilio SID, check recent recovery SMS suppression.</td>
+                <td>Voice service, SMS service, action executor, status route</td>
+              </tr>
+              <tr>
+                <td><code>call_events.py</code></td>
+                <td><code>call_events</code></td>
+                <td>Insert raw call event record for known or unknown Twilio numbers.</td>
+                <td>Voice service</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree_runs.py</code></td>
+                <td><code>decision_tree_runs</code></td>
+                <td>Insert audit rows for every SMS decision tree run.</td>
+                <td>SMS service</td>
+              </tr>
+              <tr>
+                <td><code>message_media.py</code></td>
+                <td><code>message_media</code></td>
+                <td>Insert metadata for inbound MMS attachments.</td>
+                <td>SMS service</td>
+              </tr>
+              <tr>
+                <td><code>opt_outs.py</code></td>
+                <td><code>opt_outs</code></td>
+                <td>Look up and idempotently create per-client phone suppression records.</td>
+                <td>Voice service, action executor</td>
+              </tr>
+              <tr>
+                <td><code>owner_notifications.py</code></td>
+                <td><code>owner_notifications</code></td>
+                <td>Record owner notification attempts and raw responses.</td>
+                <td>Action executor</td>
+              </tr>
+              <tr>
+                <td><code>webhook_events.py</code></td>
+                <td><code>webhook_events</code></td>
+                <td>Hash payloads, begin idempotent events, mark processed events.</td>
+                <td>Webhook route helpers in <code>main.py</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="schema">
+        <h2>Supabase Schema</h2>
+        <p>
+          The migrations in this repo add mapping, media, idempotency, and workflow-safety constraints around an existing operational schema. The application expects the base tables <code>clients</code>, <code>leads</code>, <code>conversations</code>, <code>messages</code>, <code>call_events</code>, <code>opt_outs</code>, <code>decision_tree_runs</code>, and <code>owner_notifications</code> to exist.
+        </p>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>New Tables In Migrations</h3>
+            <ul>
+              <li><code>client_phone_numbers</code>: maps active Twilio numbers to clients and flags whether each number supports voice and SMS.</li>
+              <li><code>webhook_events</code>: stores provider/event IDs and request hashes for idempotent webhook processing.</li>
+              <li><code>message_media</code>: stores Twilio media URLs and content types tied to inbound messages.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <h3>Important Constraints And Indexes</h3>
+            <ul>
+              <li><code>leads(client_id, phone_number)</code> unique because lead upsert depends on it.</li>
+              <li><code>messages(twilio_message_sid)</code> unique when not null.</li>
+              <li>One active conversation per <code>(client_id, lead_id, channel)</code>.</li>
+              <li><code>opt_outs(client_id, phone_number)</code> unique.</li>
+              <li><code>webhook_events</code> unique on provider/event/provider event ID or provider/event/request hash.</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Entity Relationships</h3>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Relationship</th>
+                <th>Why It Exists</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>clients</code></td>
+                <td>One client has many phone-number mappings, leads, conversations, messages, call events, opt-outs, notifications, and decision runs.</td>
+                <td>Represents a contractor account.</td>
+              </tr>
+              <tr>
+                <td><code>client_phone_numbers</code></td>
+                <td>Many numbers belong to one client.</td>
+                <td>Allows one contractor to have multiple Vigil-controlled numbers or different voice/SMS enablement.</td>
+              </tr>
+              <tr>
+                <td><code>leads</code></td>
+                <td>One lead belongs to one client and can have conversations/messages/calls.</td>
+                <td>Represents the customer phone number for that contractor.</td>
+              </tr>
+              <tr>
+                <td><code>conversations</code></td>
+                <td>One active SMS conversation per client/lead/channel.</td>
+                <td>Stores persistent state and collected facts between replies.</td>
+              </tr>
+              <tr>
+                <td><code>messages</code></td>
+                <td>Each message belongs to client/lead and usually a conversation.</td>
+                <td>Audits every inbound/outbound SMS and delivery status.</td>
+              </tr>
+              <tr>
+                <td><code>message_media</code></td>
+                <td>Many media rows can belong to one message.</td>
+                <td>Preserves MMS/photo context and owner notification photo status.</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree_runs</code></td>
+                <td>Each run ties to an inbound message, client, lead, and conversation.</td>
+                <td>Makes automated decisions debuggable and trustable.</td>
+              </tr>
+              <tr>
+                <td><code>owner_notifications</code></td>
+                <td>Each row ties notification outcome to client, lead, and conversation.</td>
+                <td>Tracks handoffs and notification failures.</td>
+              </tr>
+              <tr>
+                <td><code>webhook_events</code></td>
+                <td>Independent idempotency ledger keyed by provider, event type, ID/hash.</td>
+                <td>Prevents Twilio retries from duplicating side effects.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="cross-cutting">
+        <h2>Cross-Cutting Concerns</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Idempotency</h3>
+            <p>
+              Twilio retries are expected. <code>webhook_events</code> is the persistent guard. Voice events use <code>CallSid</code> plus event type/status. Inbound SMS uses <code>MessageSid</code>. Status callbacks use <code>MessageSid</code> plus status. If Supabase idempotency is unavailable, the process-local set prevents duplicates only within the current process lifetime.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Security</h3>
+            <p>
+              Twilio request signatures are validated when enabled. Validation is designed to stay enabled outside local/test environments. Supabase service-role access is server-side only. The code logs operational values like phones and message lengths, so production logging should be reviewed for PII minimization before broader deployment.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Opt-Out Safety</h3>
+            <p>
+              Missed-call recovery checks opt-outs before first customer SMS. Decision-tree reply SMS also checks opt-outs before sending. STOP and wrong-number inbound messages still process so an opt-out can be recorded.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Auditing</h3>
+            <p>
+              Messages store the actual SMS records, <code>decision_tree_runs</code> stores why the automation chose its route, <code>owner_notifications</code> stores handoff attempts, and <code>webhook_events</code> stores delivery-level processing history.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Conversation State</h3>
+            <p>
+              Conversation state is what lets the tree ask only for missing facts. State and <code>collected_info</code> are loaded before classification and persisted after action execution.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Approved Copy</h3>
+            <p>
+              Customer-facing SMS is selected by template key, not generated freely. This protects the service from arbitrary AI copy and keeps client-approved language inspectable in source.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="module-matrix">
+        <h2>Module Matrix</h2>
+        <p>
+          This table gives a file-by-file view of how the important pieces interact.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Defines</th>
+                <th>Calls / Uses</th>
+                <th>Called By</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>backend/app/main.py</code></td>
+                <td>FastAPI app, env loading, TwiML helpers, signature validation, idempotency helpers, Twilio routes.</td>
+                <td>Twilio SDK, Supabase client, webhook repository, message repository, missed-call and SMS services.</td>
+                <td>ASGI server, FastAPI TestClient, Twilio webhooks.</td>
+              </tr>
+              <tr>
+                <td><code>services/missed_call_recovery.py</code></td>
+                <td><code>process_missed_call()</code> and result dataclass.</td>
+                <td>Template renderer, client/lead/conversation/call/message/opt-out repositories, Twilio client.</td>
+                <td>Voice webhook route.</td>
+              </tr>
+              <tr>
+                <td><code>services/sms_workflow.py</code></td>
+                <td><code>InboundMedia</code>, <code>SmsWorkflowResult</code>, <code>parse_inbound_media()</code>, <code>process_inbound_sms()</code>.</td>
+                <td>Decision tree interpreter, action executor, client/lead/conversation/message/media/decision-run repositories.</td>
+                <td>SMS webhook route and tests.</td>
+              </tr>
+              <tr>
+                <td><code>services/action_executor.py</code></td>
+                <td>Action execution functions and <code>ExecutedAction</code>.</td>
+                <td>Decision contract, template renderer, Twilio client, messages/leads/conversations/opt-outs/owner-notifications repositories.</td>
+                <td>SMS workflow service.</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree/contract.py</code></td>
+                <td>Typed dataclasses and literal action/intent vocabularies.</td>
+                <td>Standard dataclasses and typing.</td>
+                <td>Classifier, interpreter, action executor, tests.</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree/classifier.py</code></td>
+                <td>Regex and keyword-based SMS classifier.</td>
+                <td>Classifier contract and base tree vocabulary.</td>
+                <td>Interpreter and tests.</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree/interpreter.py</code></td>
+                <td>Decision tree runner and helper functions for collected facts and summary.</td>
+                <td>Classifier, contract, tree key/version.</td>
+                <td>SMS workflow and tests.</td>
+              </tr>
+              <tr>
+                <td><code>decision_tree/templates/base.py</code></td>
+                <td>Approved default templates and renderer.</td>
+                <td>Classifier output type for summary fallback.</td>
+                <td>Missed-call service, action executor, tests.</td>
+              </tr>
+              <tr>
+                <td><code>repositories/*.py</code></td>
+                <td>Table-focused Supabase functions.</td>
+                <td>Supabase client and shared row helpers.</td>
+                <td>Services, action executor, route helpers.</td>
+              </tr>
+              <tr>
+                <td><code>supabase/migrations/*.sql</code></td>
+                <td>Schema additions, uniqueness constraints, indexes, RLS enablement.</td>
+                <td>Postgres/Supabase migration runner.</td>
+                <td>Deployment/migration workflow.</td>
+              </tr>
+              <tr>
+                <td><code>backend/tests/*.py</code></td>
+                <td>Unit and route tests using mocks and FastAPI TestClient.</td>
+                <td>Application modules, fake Twilio clients, unittest mocks.</td>
+                <td>Developer test command.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="tests">
+        <h2>Tests</h2>
+        <p>
+          The test suite is built around Python <code>unittest</code>. It uses fake Twilio clients and patching rather than real external calls, which keeps the tests fast and deterministic.
+        </p>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Decision Tree Tests</h3>
+            <p>
+              <code>test_decision_tree.py</code> covers intent classification, location/job/urgency extraction, every main interpreter branch, emergency notification suppression, emergency urgency preservation, and template rendering.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Missed Call Tests</h3>
+            <p>
+              <code>test_missed_call_recovery.py</code> covers known client recovery sends, unknown number logging, opt-out suppression, and duplicate recovery SMS suppression.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>SMS Workflow Tests</h3>
+            <p>
+              <code>test_sms_workflow.py</code> covers normal fact collection, status callbacks on outbound SMS, opt-outs, wrong numbers, unclear replies, owner notifications, owner notification failures, MMS metadata, and opt-out suppression.
+            </p>
+          </div>
+          <div class="panel">
+            <h3>Webhook Tests</h3>
+            <p>
+              <code>test_twilio_webhooks.py</code> covers invalid signature rejection, duplicate voice/SMS webhook behavior, MMS parsing handoff, status callback updates, and generated Twilio status callback URLs.
+            </p>
+          </div>
+        </div>
+        <pre><code>cd backend
+PYTHONPATH=. python -m unittest discover tests</code></pre>
+      </section>
+
+      <section id="gaps">
+        <h2>Current Edges</h2>
+        <p>
+          The codebase implements a strong MVP backend path, but a few technical edges are worth knowing when operating or extending it.
+        </p>
+        <div class="matrix">
+          <table>
+            <thead>
+              <tr>
+                <th>Area</th>
+                <th>Current State</th>
+                <th>Why It Matters</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Base schema</td>
+                <td>The repo includes additive migrations but not the original creation migrations for every expected table.</td>
+                <td>A fresh database needs base tables created elsewhere before these migrations are enough.</td>
+              </tr>
+              <tr>
+                <td>Client-specific templates/trees</td>
+                <td>Templates and tree vocabulary are source-defined defaults.</td>
+                <td>Good for MVP auditability, but future client-specific behavior needs versioned storage and approval workflow.</td>
+              </tr>
+              <tr>
+                <td>Durable media storage</td>
+                <td>MMS metadata is stored; Twilio media is not copied into Supabase Storage.</td>
+                <td>Twilio media URLs may not be a permanent archive, so long-term photo access may require copying.</td>
+              </tr>
+              <tr>
+                <td>Phone normalization</td>
+                <td>Lookups compare phone strings as supplied.</td>
+                <td>Production reliability improves if all phone numbers are normalized to E.164 at boundaries.</td>
+              </tr>
+              <tr>
+                <td>Error handling</td>
+                <td>Routes catch broad exceptions and print errors, returning TwiML.</td>
+                <td>Operational visibility should eventually move to structured logs and human-facing failure alerts.</td>
+              </tr>
+              <tr>
+                <td>Process-local fallback idempotency</td>
+                <td>If persistent idempotency fails, duplicates are suppressed only in the current process memory.</td>
+                <td>Multi-process or restarted deployments need the <code>webhook_events</code> table functioning.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="glossary">
+        <h2>Glossary</h2>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Lead</h3>
+            <p>A customer phone number in relation to one contractor client. The same phone number could be a separate lead for a different client.</p>
+          </div>
+          <div class="panel">
+            <h3>Conversation</h3>
+            <p>The active SMS workflow state for a lead. It stores what the automation already knows and what it is waiting for next.</p>
+          </div>
+          <div class="panel">
+            <h3>Decision Run</h3>
+            <p>An audit record of one inbound SMS going through classifier and interpreter, including matched node and planned actions.</p>
+          </div>
+          <div class="panel">
+            <h3>Action</h3>
+            <p>A typed instruction from the decision tree, such as sending an approved template, marking a lead status, or notifying the owner.</p>
+          </div>
+          <div class="panel">
+            <h3>TwiML</h3>
+            <p>XML returned to Twilio that tells it what to do with a call or message webhook. This code returns either answer-and-hangup voice TwiML or empty response TwiML.</p>
+          </div>
+          <div class="panel">
+            <h3>Webhook Event</h3>
+            <p>A persistence record used to determine whether a Twilio webhook delivery is new or a retry that should not run side effects again.</p>
+          </div>
+        </div>
+        <p class="footnote">
+          Generated from the code and notes in this repository. Last authored as a static reference page for local review.
+        </p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

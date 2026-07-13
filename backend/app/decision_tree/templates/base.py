@@ -39,6 +39,7 @@ DEFAULT_TEMPLATES = {
         "Location: {location}\n"
         "Service: {job_type}\n"
         "Urgency: {urgency}\n"
+        "Photo: {photo_status}\n"
         "Latest: {latest_message}\n"
         "Summary: {summary}"
     ),
@@ -59,6 +60,10 @@ def _clip(value: str, max_length: int = 240) -> str:
     return f"{text[: max_length - 3].rstrip()}..."
 
 
+def _photo_status(collected_info: dict[str, Any]) -> str:
+    return "Received" if collected_info.get("photo_received") else "Not received"
+
+
 def render_template(
     template_key: str,
     *,
@@ -73,7 +78,9 @@ def render_template(
     template = DEFAULT_TEMPLATES[template_key]
     info = collected_info or {}
     business_name = _value(client.get("business_name"), "the team")
-    rendered_summary = summary or (classifier_output.summary if classifier_output else "")
+    rendered_summary = summary or (
+        classifier_output.summary if classifier_output else ""
+    )
 
     return template.format(
         business_name=business_name,
@@ -81,6 +88,7 @@ def render_template(
         location=_value(info.get("location")),
         job_type=_value(info.get("job_type")),
         urgency=_value(info.get("urgency")),
+        photo_status=_photo_status(info),
         latest_message=_clip(latest_message or ""),
         priority=priority.upper(),
         summary=_clip(rendered_summary or "No summary yet."),
