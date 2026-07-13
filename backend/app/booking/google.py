@@ -279,3 +279,22 @@ class GoogleCalendarProvider:
             external_event_id=str(response_payload.get("id") or event_id),
             metadata={"html_link": response_payload.get("htmlLink")},
         )
+
+    def disconnect(self, connection: dict[str, Any]) -> None:
+        token = self._credentials.access_token(connection, self._oauth)
+        try:
+            response = self._http.post(
+                "https://oauth2.googleapis.com/revoke",
+                params={"token": token},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        except httpx.HTTPError as exc:
+            raise BookingProviderError(
+                "Google disconnect failed",
+                code="google_disconnect_transport",
+                retryable=True,
+            ) from exc
+        if response.status_code not in {200, 400}:
+            raise BookingProviderError(
+                "Google disconnect failed", code="google_disconnect"
+            )

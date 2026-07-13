@@ -149,6 +149,15 @@ query VigilJobReconcile($clientId: EncodedId!) {
 }
 """
 
+APP_DISCONNECT_MUTATION = """
+mutation VigilAppDisconnect {
+  appDisconnect {
+    app { name author }
+    userErrors { message path }
+  }
+}
+"""
+
 
 def normalize_phone(value: str) -> str:
     digits = "".join(char for char in value if char.isdigit())
@@ -662,3 +671,15 @@ class JobberProvider:
             external_visit_id=visit_id,
             metadata={"vigil_marker": marker, "idempotency_key": idempotency_key},
         )
+
+    def disconnect(self, connection: dict[str, Any]) -> None:
+        data = self._graphql.execute(
+            connection,
+            APP_DISCONNECT_MUTATION,
+            mutation=True,
+        )
+        errors = _user_errors(data.get("appDisconnect"))
+        if errors:
+            raise BookingProviderError(
+                "Jobber disconnect failed", code="jobber_disconnect"
+            )

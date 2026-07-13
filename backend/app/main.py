@@ -11,6 +11,8 @@ from supabase import Client, create_client
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
+from app.booking.runtime import build_booking_runtime
+from app.booking.setup_routes import create_booking_setup_router
 from app.repositories import clients as client_repository
 from app.repositories import messages as message_repository
 from app.services.missed_call_recovery import process_missed_call
@@ -111,6 +113,8 @@ else:
 twilio_validator: RequestValidator | None = (
     RequestValidator(TWILIO_AUTH_TOKEN) if TWILIO_AUTH_TOKEN else None
 )
+booking_runtime = build_booking_runtime(supabase, env_value)
+app.include_router(create_booking_setup_router(lambda: booking_runtime))
 
 
 def end_call_twiml() -> Response:
