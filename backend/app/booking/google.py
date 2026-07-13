@@ -15,6 +15,7 @@ from app.booking.domain import (
     ConnectionValidation,
     ProviderAuthenticationError,
     ProviderBooking,
+    ProviderName,
     ProviderRateLimitError,
     UnknownBookingOutcomeError,
 )
@@ -25,7 +26,7 @@ GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 
 
 class GoogleCalendarProvider:
-    name = "google"
+    name: ProviderName = "google"
 
     def __init__(
         self,

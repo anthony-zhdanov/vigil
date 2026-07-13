@@ -15,6 +15,7 @@ from app.booking.domain import (
     ConnectionValidation,
     ProviderAuthenticationError,
     ProviderBooking,
+    ProviderName,
     ProviderRateLimitError,
     UnknownBookingOutcomeError,
 )
@@ -277,7 +278,7 @@ class JobberGraphQLClient:
 
 
 class JobberProvider:
-    name = "jobber"
+    name: ProviderName = "jobber"
 
     def __init__(self, graphql: JobberGraphQLClient) -> None:
         self._graphql = graphql

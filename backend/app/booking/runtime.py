@@ -100,7 +100,7 @@ class BookingRuntime:
         row = setup_repo.find_setup_token(
             self.supabase, token_hash=hash_secret(raw_token)
         )
-        if not _setup_token_is_claimable(row):
+        if row is None or not _setup_token_is_claimable(row):
             return None
         session_token = generate_secret()
         claimed = setup_repo.claim_setup_token(
@@ -117,7 +117,7 @@ class BookingRuntime:
         row = setup_repo.find_setup_session(
             self.supabase, session_hash=hash_secret(raw_session)
         )
-        if not _setup_session_is_active(row):
+        if row is None or not _setup_session_is_active(row):
             return None
         client = clients_repo.get_client_by_id(self.supabase, str(row["client_id"]))
         if client is None:
@@ -200,7 +200,7 @@ class BookingRuntime:
         state_row = setup_repo.consume_oauth_state(
             self.supabase, state_hash=state_hash
         )
-        if not _oauth_state_is_valid(state_row, provider_name):
+        if state_row is None or not _oauth_state_is_valid(state_row, provider_name):
             raise ValueError("OAuth state is invalid or expired")
         verifier = None
         encrypted_verifier = state_row.get("code_verifier_encrypted")
