@@ -258,7 +258,7 @@ Row-level security is enabled on these tables. The backend currently uses the Su
 
 Important database invariants include unique client/lead phone pairs, unique Twilio message IDs, one active conversation per client/lead/channel, unique opt-outs per client/phone pair, and unique webhook-provider event identities or request hashes.
 
-The tracked migrations add client phone numbers, webhook idempotency, MMS metadata, workflow indexes and constraints, and support for reopening conversations after earlier conversations close. The repository does not currently contain the complete migration history that originally created every base table; this should be corrected before relying on migrations to reproduce the database from scratch.
+The tracked migrations add client phone numbers, webhook idempotency, MMS metadata, workflow indexes and constraints, and support for reopening conversations after earlier conversations close. The reopening migration (`20260708011000_allow_reopened_conversations.sql`) exists in the repository but was not present in the remote Supabase migration history when checked on 2026-07-12. The repository also does not currently contain the complete migration history that originally created every base table; this should be corrected before relying on migrations to reproduce the database from scratch.
 
 Calendar integration will require persisted calendar connections and booking records. Those tables and migrations do not exist yet.
 
@@ -310,7 +310,7 @@ Twilio requires a stable public HTTPS endpoint in deployed environments. A local
 - Persistent and process-local webhook duplicate protection
 - Missed-call logging, lead upsert, active-conversation suppression, and 60-minute recent-message suppression
 - Recovery SMS creation and outbound status recording
-- Persistent SMS conversations that can be closed and later reopened as a new conversation
+- Persistent SMS conversations that can be closed and later reopened as a new conversation once the pending reopening migration is applied
 - Deterministic plumbing SMS classification and multi-step intake
 - Approved customer and owner SMS templates
 - Opt-out and wrong-number suppression
