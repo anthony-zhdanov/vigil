@@ -79,6 +79,7 @@ def process_missed_call(
     call_status: str | None,
     raw_payload: dict[str, Any] | None = None,
     status_callback_url: str | None = None,
+    authorized_client: dict[str, Any] | None = None,
 ) -> MissedCallRecoveryResult:
     if not from_phone or not to_phone:
         return MissedCallRecoveryResult(
@@ -89,7 +90,7 @@ def process_missed_call(
             processed=False, ignored_reason="supabase_not_configured"
         )
 
-    client = clients_repo.find_client_for_voice_number(
+    client = authorized_client or clients_repo.find_client_for_voice_number(
         supabase, to_phone, legacy_fallback=True
     )
     if client is None:

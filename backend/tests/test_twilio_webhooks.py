@@ -22,6 +22,7 @@ class TwilioWebhookTests(unittest.TestCase):
                 "twilio_validator",
                 "supabase",
                 "twilio_client",
+                "authorize_voice_number",
                 "begin_twilio_webhook_event",
                 "mark_twilio_webhook_event_processed",
                 "process_missed_call",
@@ -35,6 +36,10 @@ class TwilioWebhookTests(unittest.TestCase):
         main.TWILIO_VALIDATE_SIGNATURE = False
         main.twilio_validator = None
         main.supabase = object()
+        main.authorize_voice_number = lambda twilio_number: {
+            "id": "client_1",
+            "business_name": "Acme Plumbing",
+        }
         main._process_local_webhook_events.clear()
 
     def tearDown(self) -> None:
@@ -54,6 +59,60 @@ class TwilioWebhookTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_voice_webhook_rejects_unauthorized_voice_number(self) -> None:
+        calls: dict[str, Any] = {"begin": 0, "processed": 0, "marked": 0}
+
+        main.authorize_voice_number = lambda twilio_number: None
+        main.begin_twilio_webhook_event = (
+            lambda *args, **kwargs: calls.__setitem__("begin", calls["begin"] + 1)
+            or ("event-1", True)
+        )
+        main.mark_twilio_webhook_event_processed = (
+            lambda event_id: calls.__setitem__("marked", calls["marked"] + 1)
+        )
+        main.process_missed_call = (
+            lambda *args, **kwargs: calls.__setitem__(
+                "processed", calls["processed"] + 1
+            )
+            or SimpleNamespace(processed=True, ignored_reason=None)
+        )
+
+        response = self.client.post(
+            "/webhooks/twilio/voice",
+            data={
+                "From": "+14165550100",
+                "To": "+14165550200",
+                "CallSid": "CA123",
+                "CallStatus": "no-answer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<Reject reason=\"rejected\"/>", response.text)
+        self.assertNotIn("<Say", response.text)
+        self.assertEqual(calls, {"begin": 0, "processed": 0, "marked": 0})
+
+    def test_authorize_voice_number_uses_strict_phone_number_lookup(self) -> None:
+        calls: list[dict[str, Any]] = []
+        original_lookup = main.client_repository.find_client_for_voice_number
+        main.authorize_voice_number = self.saved_attrs["authorize_voice_number"]
+
+        def lookup(supabase: Any, twilio_number: str, **kwargs: Any) -> dict[str, str]:
+            calls.append({"twilio_number": twilio_number, **kwargs})
+            return {"id": "client_1"}
+
+        main.client_repository.find_client_for_voice_number = lookup
+        try:
+            client = main.authorize_voice_number("+14165550200")
+        finally:
+            main.client_repository.find_client_for_voice_number = original_lookup
+
+        self.assertEqual(client, {"id": "client_1"})
+        self.assertEqual(
+            calls,
+            [{"twilio_number": "+14165550200", "legacy_fallback": False}],
+        )
 
     def test_duplicate_voice_webhook_does_not_resend_recovery_sms(self) -> None:
         calls: dict[str, Any] = {"begin": [], "processed": 0, "marked": 0}
@@ -124,6 +183,7 @@ class TwilioWebhookTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(calls["kwargs"][0]["from_phone"], "+14165550100")
         self.assertEqual(calls["kwargs"][0]["to_phone"], "+14165550200")
+        self.assertEqual(calls["kwargs"][0]["authorized_client"]["id"], "client_1")
         self.assertEqual(calls["marked"], 1)
 
     def test_voice_webhook_exception_does_not_mark_event_processed(self) -> None:

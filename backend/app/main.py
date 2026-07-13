@@ -11,6 +11,7 @@ from supabase import Client, create_client
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client as TwilioClient
 
+from app.repositories import clients as client_repository
 from app.repositories import messages as message_repository
 from app.services.missed_call_recovery import process_missed_call
 from app.services.sms_workflow import parse_inbound_media, process_inbound_sms
@@ -127,6 +128,14 @@ def end_call_twiml() -> Response:
     return Response(content=twiml, media_type="text/xml")
 
 
+def reject_call_twiml(reason: str = "rejected") -> Response:
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Reject reason="{reason}"/>
+</Response>"""
+    return Response(content=twiml, media_type="text/xml")
+
+
 def empty_twiml() -> Response:
     twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response></Response>"""
@@ -174,6 +183,30 @@ def twilio_signature_is_valid(request: Request, params: dict[str, str]) -> bool:
     if not signature:
         return False
     return bool(twilio_validator.validate(public_request_url(request), params, signature))
+
+
+def authorize_voice_number(twilio_number: str | None) -> dict[str, Any] | None:
+    if not twilio_number:
+        print("Rejected Twilio voice webhook: missing To/Called.")
+        return None
+    if supabase is None:
+        print("Rejected Twilio voice webhook: Supabase not configured.")
+        return None
+
+    try:
+        client = client_repository.find_client_for_voice_number(
+            supabase,
+            twilio_number,
+            legacy_fallback=False,
+        )
+    except Exception as exc:
+        print("Rejected Twilio voice webhook: authorization lookup failed:", repr(exc))
+        return None
+
+    if client is None:
+        print("Rejected Twilio voice webhook: unauthorized voice number:", twilio_number)
+        return None
+    return client
 
 
 def request_hash_from_payload(payload: dict[str, str]) -> str:
@@ -288,6 +321,10 @@ async def twilio_voice_webhook(request: Request):
     call_sid = form_value(form, "CallSid")
     call_status = form_value(form, "CallStatus")
 
+    authorized_client = authorize_voice_number(twilio_number)
+    if authorized_client is None:
+        return reject_call_twiml()
+
     webhook_event_id, should_process = begin_twilio_webhook_event(
         event_type=f"voice:{call_status or 'unknown'}",
         provider_event_id=call_sid,
@@ -314,6 +351,7 @@ async def twilio_voice_webhook(request: Request):
             call_status=call_status,
             raw_payload=raw_payload,
             status_callback_url=twilio_status_callback_url(),
+            authorized_client=authorized_client,
         )
         if result.processed:
             print("Missed-call recovery SMS processed")
