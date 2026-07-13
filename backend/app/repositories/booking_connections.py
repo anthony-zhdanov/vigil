@@ -51,6 +51,24 @@ def list_client_connections(
     return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
 
 
+def get_by_provider_account_id(
+    supabase: Client | None,
+    *,
+    provider: str,
+    provider_account_id: str,
+) -> Row | None:
+    db = require_supabase(supabase)
+    response = (
+        db.table("booking_connections")
+        .select("*")
+        .eq("provider", provider)
+        .eq("provider_account_id", provider_account_id)
+        .limit(1)
+        .execute()
+    )
+    return maybe_first_row(response, "booking connection")
+
+
 def upsert_connection(
     supabase: Client | None,
     *,

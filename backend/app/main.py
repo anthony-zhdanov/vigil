@@ -13,6 +13,10 @@ from twilio.rest import Client as TwilioClient
 
 from app.booking.runtime import build_booking_runtime
 from app.booking.setup_routes import create_booking_setup_router
+from app.booking.jobber_webhooks import (
+    JobberWebhookProcessor,
+    create_jobber_webhook_router,
+)
 from app.repositories import clients as client_repository
 from app.repositories import messages as message_repository
 from app.services.missed_call_recovery import process_missed_call
@@ -115,6 +119,20 @@ twilio_validator: RequestValidator | None = (
 )
 booking_runtime = build_booking_runtime(supabase, env_value)
 app.include_router(create_booking_setup_router(lambda: booking_runtime))
+jobber_webhook_processor = (
+    JobberWebhookProcessor(supabase, client_secret=env_value("JOBBER_CLIENT_SECRET") or "")
+    if supabase is not None and env_value("JOBBER_CLIENT_SECRET")
+    else None
+)
+app.include_router(
+    create_jobber_webhook_router(lambda: jobber_webhook_processor)
+)
+
+
+@app.on_event("startup")
+async def replay_pending_jobber_webhooks() -> None:
+    if jobber_webhook_processor is not None:
+        jobber_webhook_processor.process_pending()
 
 
 def end_call_twiml() -> Response:

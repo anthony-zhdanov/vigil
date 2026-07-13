@@ -41,3 +41,23 @@ def get_enabled_client_config(
     if config.get("mode") not in {"shadow", "live"}:
         return None
     return config
+
+
+def disable_connection(
+    supabase: Client | None, *, connection_id: str
+) -> Row | None:
+    db = require_supabase(supabase)
+    response = (
+        db.table("booking_configs")
+        .update(
+            {
+                "connection_id": None,
+                "enabled": False,
+                "mode": "disabled",
+                "updated_at": now_iso(),
+            }
+        )
+        .eq("connection_id", connection_id)
+        .execute()
+    )
+    return maybe_first_row(response, "booking config")

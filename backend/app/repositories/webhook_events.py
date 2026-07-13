@@ -51,6 +51,7 @@ def begin_webhook_event(
     event_type: str,
     provider_event_id: str | None,
     request_hash: str,
+    raw_payload: dict[str, Any] | None = None,
 ) -> tuple[Row, bool]:
     db = require_supabase(supabase)
     existing = get_webhook_event(
@@ -68,6 +69,7 @@ def begin_webhook_event(
         "event_type": event_type,
         "provider_event_id": provider_event_id,
         "request_hash": request_hash,
+        "raw_payload": raw_payload or {},
     }
     try:
         response = db.table("webhook_events").insert(payload).execute()
@@ -95,6 +97,49 @@ def mark_webhook_event_processed(
     response = (
         db.table("webhook_events")
         .update({"processed_at": processed_at or now_iso()})
+        .eq("id", event_id)
+        .execute()
+    )
+    return maybe_first_row(response, "webhook event")
+
+
+def list_unprocessed_webhook_events(
+    supabase: Client | None,
+    *,
+    provider: str,
+    limit: int = 25,
+) -> list[Row]:
+    db = require_supabase(supabase)
+    response = (
+        db.table("webhook_events")
+        .select("*")
+        .eq("provider", provider)
+        .is_("processed_at", "null")
+        .order("created_at")
+        .limit(limit)
+        .execute()
+    )
+    data = getattr(response, "data", None)
+    return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
+def mark_webhook_event_failed(
+    supabase: Client | None,
+    *,
+    event_id: str,
+    attempts: int,
+    error_code: str,
+) -> Row | None:
+    db = require_supabase(supabase)
+    response = (
+        db.table("webhook_events")
+        .update(
+            {
+                "attempts": attempts,
+                "last_attempted_at": now_iso(),
+                "last_error": error_code[:160],
+            }
+        )
         .eq("id", event_id)
         .execute()
     )
