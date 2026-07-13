@@ -14,6 +14,7 @@ from app.repositories import message_media as message_media_repo
 from app.repositories import messages as messages_repo
 from app.repositories._shared import now_iso
 from app.services.action_executor import ExecutedAction, execute_actions
+from app.services.booking_workflow import BookingOrchestrator
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,7 @@ def process_inbound_sms(
     raw_payload: dict[str, Any] | None = None,
     media: list[InboundMedia] | None = None,
     status_callback_url: str | None = None,
+    booking_orchestrator: BookingOrchestrator | None = None,
 ) -> SmsWorkflowResult:
     if not from_phone or not to_phone:
         return SmsWorkflowResult(
@@ -175,6 +177,24 @@ def process_inbound_sms(
         current_state=_conversation_state(conversation),
         collected_info=collected_info,
     )
+    if booking_orchestrator is not None:
+        booking_mode = booking_orchestrator.booking_mode(
+            client_id, decision_result.collected_info
+        )
+        if booking_mode != "disabled" or _conversation_state(conversation) in {
+            "awaiting_customer_name",
+            "awaiting_slot_selection",
+            "finding_availability",
+            "booking",
+            "booked",
+            "booking_handoff",
+        }:
+            decision_result = run_plumbing_decision_tree(
+                message_body=body,
+                current_state=_conversation_state(conversation),
+                collected_info=collected_info,
+                booking_mode=booking_mode,
+            )
 
     decision_tree_run = decision_tree_runs_repo.insert_decision_tree_run(
         supabase,
@@ -191,7 +211,7 @@ def process_inbound_sms(
     )
     decision_tree_run_id = _row_id(decision_tree_run, "decision tree run")
 
-    executed_actions = execute_actions(
+    execution = execute_actions(
         supabase,
         twilio_client,
         result=decision_result,
@@ -202,19 +222,20 @@ def process_inbound_sms(
         customer_phone=from_phone,
         twilio_number=to_phone,
         status_callback_url=status_callback_url,
+        booking_orchestrator=booking_orchestrator,
     )
 
     timestamp = now_iso()
     conversations_repo.update_conversation(
         supabase,
         conversation_id=conversation_id,
-        status=decision_result.conversation_status,
-        current_state=decision_result.conversation_state,
-        collected_info=decision_result.collected_info,
-        summary=decision_result.summary,
+        status=execution.conversation_status,
+        current_state=execution.conversation_state,
+        collected_info=execution.collected_info,
+        summary=execution.summary,
         last_message_at=timestamp,
         closed_at=timestamp
-        if decision_result.conversation_status == "closed"
+        if execution.conversation_status == "closed"
         else None,
     )
 
@@ -226,5 +247,5 @@ def process_inbound_sms(
         inbound_message_id=inbound_message_id,
         decision_tree_run_id=decision_tree_run_id,
         matched_node_key=decision_result.matched_node_key,
-        executed_actions=executed_actions,
+        executed_actions=execution.actions,
     )

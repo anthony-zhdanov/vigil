@@ -32,6 +32,28 @@ DEFAULT_TEMPLATES = {
     "handoff_to_team": (
         "Thanks. We have the details and passed this to the team. Someone will follow up shortly."
     ),
+    "request_customer_name": (
+        "Great. What is the full name for the appointment?"
+    ),
+    "booking_slots": (
+        "Here are the next available times:\n{slot_options}\n"
+        "Reply 1, 2, or 3 to book, or reply MORE for later times."
+    ),
+    "invalid_slot_selection": (
+        "Please reply 1, 2, or 3 for one of the offered times, or reply MORE."
+    ),
+    "booking_confirmation": (
+        "You are booked for {booking_time}. The team has your name, phone number, "
+        "and service address."
+    ),
+    "booking_pending_confirmation": (
+        "We could not confirm the booking automatically. The team has been alerted "
+        "and will confirm the appointment with you."
+    ),
+    "booking_handoff": (
+        "We could not complete online booking for this request. The team has your "
+        "details and will follow up."
+    ),
     "owner_notification": (
         "Vigil lead for {business_name}\n"
         "Lead: {lead_phone}\n"
@@ -89,6 +111,8 @@ def render_template(
         job_type=_value(info.get("job_type")),
         urgency=_value(info.get("urgency")),
         photo_status=_photo_status(info),
+        slot_options=_value(info.get("slot_options"), "No times available"),
+        booking_time=_value(info.get("booking_time"), "the selected time"),
         latest_message=_clip(latest_message or ""),
         priority=priority.upper(),
         summary=_clip(rendered_summary or "No summary yet."),

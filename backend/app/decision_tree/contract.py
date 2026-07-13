@@ -11,6 +11,9 @@ ActionType = Literal[
     "create_opt_out",
     "notify_owner",
     "close_conversation",
+    "offer_booking_slots",
+    "create_booking",
+    "booking_handoff",
 ]
 
 
@@ -45,6 +48,8 @@ class DecisionAction:
     lead_status: str | None = None
     opt_out_reason: str | None = None
     notification_priority: str | None = None
+    booking_page_index: int | None = None
+    booking_slot_index: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +58,8 @@ class DecisionAction:
             "lead_status": self.lead_status,
             "opt_out_reason": self.opt_out_reason,
             "notification_priority": self.notification_priority,
+            "booking_page_index": self.booking_page_index,
+            "booking_slot_index": self.booking_slot_index,
         }
 
 

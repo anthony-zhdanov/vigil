@@ -442,6 +442,11 @@ async def twilio_sms_webhook(request: Request):
             raw_payload=raw_payload,
             media=media,
             status_callback_url=twilio_status_callback_url(),
+            booking_orchestrator=(
+                booking_runtime.booking_orchestrator()
+                if booking_runtime is not None
+                else None
+            ),
         )
         if result.processed:
             print("SMS decision-tree workflow processed")

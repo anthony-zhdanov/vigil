@@ -20,6 +20,7 @@ from app.repositories import booking_connections as connections_repo
 from app.repositories import booking_services as services_repo
 from app.repositories import booking_setup as setup_repo
 from app.repositories import clients as clients_repo
+from app.services.booking_workflow import BookingOrchestrator
 
 
 EnvironmentReader = Callable[[str], str | None]
@@ -75,6 +76,15 @@ class BookingRuntime:
         self.public_base_url = public_base_url.rstrip("/")
         self.provider_bundles = provider_bundles
         self.secure_cookies = secure_cookies
+
+    def booking_orchestrator(self) -> BookingOrchestrator:
+        return BookingOrchestrator(
+            self.supabase,
+            {
+                provider_name: bundle.provider
+                for provider_name, bundle in self.provider_bundles.items()
+            },
+        )
 
     def create_setup_link(self, client_id: str, *, valid_hours: int = 24) -> str:
         raw_token = generate_secret()
