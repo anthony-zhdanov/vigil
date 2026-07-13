@@ -17,6 +17,7 @@ from app.booking.domain import (
     BookingResource,
     ServiceSchedule,
     Slot,
+    UnknownBookingOutcomeError,
 )
 from app.booking.jobber import JobberGraphQLClient, JobberProvider
 from app.booking.oauth import OAuthClient, OAuthProviderConfig
@@ -260,3 +261,24 @@ class JobberBookingProviderTests(unittest.TestCase):
         visit_input = operations[-1][1]["input"]
         self.assertEqual(visit_input["assignedUserIds"], ["user-1"])
         self.assertIn("[Vigil:123e4567", visit_input["instructions"])
+
+    def test_graphql_mutation_errors_preserve_unknown_outcome(self) -> None:
+        graphql = JobberGraphQLClient(
+            self.credentials,
+            self.oauth,
+            api_version=self.api_version,
+            http_client=httpx.Client(
+                transport=httpx.MockTransport(
+                    lambda request: httpx.Response(
+                        200, json={"errors": [{"message": "unexpected"}]}
+                    )
+                )
+            ),
+        )
+
+        with self.assertRaises(UnknownBookingOutcomeError):
+            graphql.execute(
+                self.connection,
+                "mutation VigilTest { testMutation { id } }",
+                mutation=True,
+            )

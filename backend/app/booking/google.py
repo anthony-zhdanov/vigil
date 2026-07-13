@@ -246,11 +246,20 @@ class GoogleCalendarProvider:
                 json=payload,
             )
         except BookingProviderError as exc:
-            if exc.code not in {"google_timeout", "google_transport"}:
+            if exc.code not in {
+                "google_timeout",
+                "google_transport",
+                "google_server_error",
+            }:
                 raise
-            existing = self._existing_event(
-                connection, request.resource_id, event_id
-            )
+            try:
+                existing = self._existing_event(
+                    connection, request.resource_id, event_id
+                )
+            except BookingProviderError as reconcile_error:
+                raise UnknownBookingOutcomeError(
+                    "Google event creation could not be reconciled"
+                ) from reconcile_error
             if existing is None:
                 raise UnknownBookingOutcomeError(
                     "Google event creation could not be reconciled"
@@ -258,9 +267,14 @@ class GoogleCalendarProvider:
             response_payload = existing
         else:
             if response.status_code == 409:
-                response_payload = self._existing_event(
-                    connection, request.resource_id, event_id
-                )
+                try:
+                    response_payload = self._existing_event(
+                        connection, request.resource_id, event_id
+                    )
+                except BookingProviderError as reconcile_error:
+                    raise UnknownBookingOutcomeError(
+                        "Google event conflict could not be reconciled"
+                    ) from reconcile_error
                 if response_payload is None:
                     raise UnknownBookingOutcomeError(
                         "Google reported a conflict without an existing event"

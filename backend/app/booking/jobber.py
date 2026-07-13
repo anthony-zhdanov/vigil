@@ -260,17 +260,38 @@ class JobberGraphQLClient:
                 "Jobber rejected the request", code="jobber_http_error"
             )
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            if mutation:
+                raise UnknownBookingOutcomeError(
+                    "Jobber mutation returned an unreadable response"
+                ) from exc
+            raise BookingProviderError(
+                "Jobber returned an invalid response", code="jobber_invalid_response"
+            ) from exc
         if not isinstance(payload, dict):
+            if mutation:
+                raise UnknownBookingOutcomeError(
+                    "Jobber mutation returned an invalid response"
+                )
             raise BookingProviderError(
                 "Jobber returned an invalid response", code="jobber_invalid_response"
             )
         if payload.get("errors"):
+            if mutation:
+                raise UnknownBookingOutcomeError(
+                    "Jobber mutation returned GraphQL errors after submission"
+                )
             raise BookingProviderError(
                 "Jobber GraphQL operation failed", code="jobber_graphql_error"
             )
         data = payload.get("data")
         if not isinstance(data, dict):
+            if mutation:
+                raise UnknownBookingOutcomeError(
+                    "Jobber mutation response did not contain data"
+                )
             raise BookingProviderError(
                 "Jobber response did not contain data", code="jobber_missing_data"
             )
@@ -605,12 +626,15 @@ class JobberProvider:
                 },
                 mutation=True,
             )
-        except UnknownBookingOutcomeError:
-            job_id, visit_id = self._reconcile(
-                connection, client_id=client_id, marker=marker
-            )
+        except UnknownBookingOutcomeError as unknown_error:
+            try:
+                job_id, visit_id = self._reconcile(
+                    connection, client_id=client_id, marker=marker
+                )
+            except Exception:
+                raise unknown_error
             if not job_id:
-                raise
+                raise unknown_error
             if visit_id:
                 return ProviderBooking(
                     provider="jobber",
@@ -646,12 +670,15 @@ class JobberProvider:
                 },
                 mutation=True,
             )
-        except UnknownBookingOutcomeError:
-            reconciled_job_id, visit_id = self._reconcile(
-                connection, client_id=client_id, marker=marker
-            )
+        except UnknownBookingOutcomeError as unknown_error:
+            try:
+                reconciled_job_id, visit_id = self._reconcile(
+                    connection, client_id=client_id, marker=marker
+                )
+            except Exception:
+                raise unknown_error
             if not visit_id:
-                raise
+                raise unknown_error
             job_id = reconciled_job_id or job_id
         else:
             result = visit_data.get("visitCreate")

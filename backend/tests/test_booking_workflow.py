@@ -293,6 +293,19 @@ class BookingWorkflowTests(unittest.TestCase):
         self.assertEqual(outcome.kind, "unknown")
         self.assertEqual(harness.booking_updates[-1]["values"]["status"], "unknown")
 
+    def test_unexpected_provider_exception_is_treated_as_unknown(self) -> None:
+        harness = BookingWorkflowHarness()
+        harness.offer()
+        harness.provider.error = ValueError("unreadable provider response")
+
+        outcome = harness.book()
+
+        self.assertEqual(outcome.kind, "unknown")
+        self.assertEqual(
+            harness.booking_updates[-1]["values"]["failure_code"],
+            "provider_result_unknown",
+        )
+
     def test_emergencies_are_never_booking_eligible(self) -> None:
         harness = BookingWorkflowHarness()
         collected = {**harness.collected, "urgency": "emergency"}

@@ -10,7 +10,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from app.booking.credentials import ConnectionCredentialManager
-from app.booking.domain import BookingRequest, BookingResource, ServiceSchedule, Slot
+from app.booking.domain import (
+    BookingRequest,
+    BookingResource,
+    ServiceSchedule,
+    Slot,
+    UnknownBookingOutcomeError,
+)
 from app.booking.google import GoogleCalendarProvider
 from app.booking.oauth import OAuthClient, OAuthProviderConfig
 from app.booking.security import TokenCipher
@@ -206,3 +212,14 @@ class GoogleBookingProviderTests(unittest.TestCase):
         self.assertEqual(len(self.updates), 1)
         self.assertEqual(self.updates[0]["token_version"], 2)
         self.assertNotIn("rotated-access", self.updates[0]["access_token_encrypted"])
+
+    def test_failed_reconciliation_preserves_unknown_create_outcome(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timeout", request=request)
+
+        with self.assertRaises(UnknownBookingOutcomeError):
+            self.provider(handler).create_booking(
+                self.connection,
+                self.request(),
+                "idempotency-1",
+            )

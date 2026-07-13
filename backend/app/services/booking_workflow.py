@@ -343,6 +343,24 @@ class BookingOrchestrator:
                 },
             )
             return self._handoff(next_info, exc.code)
+        except Exception:
+            bookings_repo.update_booking(
+                self.supabase,
+                booking_id=str(booking["id"]),
+                values={
+                    "status": "unknown",
+                    "failure_code": "provider_result_unknown",
+                    "failure_message": "Provider confirmation required",
+                },
+            )
+            return BookingActionOutcome(
+                kind="unknown",
+                template_key="booking_pending_confirmation",
+                conversation_state="booking_handoff",
+                conversation_status="waiting_for_owner",
+                collected_info=next_info,
+                detail="provider_result_unknown",
+            )
 
         if provider_booking.status == "unknown":
             bookings_repo.update_booking(
