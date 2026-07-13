@@ -2,16 +2,16 @@
 
 > **Purpose.** This document defines Vigil's current product direction, business context, system behavior, and implementation state. It is written to give founders and coding agents enough context to make consistent product and engineering decisions without carrying forward obsolete planning material.
 >
-> **Last updated:** 2026-07-12
+> **Last updated:** 2026-07-13
 >
-> **Status:** Active development. The missed-call and SMS recovery foundation is implemented. Automated calendar booking, beginning with Google Calendar, is part of the MVP but has not been implemented.
+> **Status:** Active development. Missed-call recovery and the Google/Jobber automated-booking vertical slice are implemented in code and covered by automated tests. Booking migrations have not been applied through this implementation task, provider credentials are not configured, and live provider conformance tests are still required before rollout.
 
 ## 1. Document authority
 
 This document is no longer intended to be the project's only source of truth.
 
 - `data/context/context.md` defines the product, business intent, technical architecture, and current implementation state.
-- A root-level `AGENTS.md` will define coding-agent instructions, repository conventions, safety requirements, and verification practices. It has not been created yet.
+- Root-level `AGENTS.md` defines coding-agent instructions, repository conventions, safety requirements, and verification practices.
 - The code, tests, and Supabase migrations describe the implementation that actually exists. When this document disagrees with the repository about current behavior, verify the code and update this document.
 - `data/raw/` is a historical archive from the initial research, planning, and synthesis phase. Its PDFs, spreadsheets, images, and rough notes are not authoritative and must not change product direction unless the founders explicitly revisit them.
 
@@ -72,7 +72,7 @@ The contractor should not need to answer the original call or manually copy lead
 - Collection of vertical-specific booking details such as location, job type, and urgency
 - MMS metadata capture so customer photos can be associated with the conversation
 - Owner notification for urgent or completed intake paths where appropriate
-- Calendar connection and availability lookup, beginning with Google Calendar
+- Google Calendar and Jobber connection, resource selection, and availability lookup
 - Appointment-slot selection within the SMS conversation
 - Calendar-event creation and customer booking confirmation
 - Traceable records for calls, messages, workflow decisions, notifications, and bookings
@@ -91,7 +91,7 @@ The intended client experience is:
 - Conditional forwarding sends only missed calls to Vigil.
 - The contractor connects a supported calendar and configures booking rules.
 - Vigil conducts SMS intake and creates valid appointments automatically.
-- The contractor treats Vigil-created calendar events as real bookings and keeps calendar availability accurate.
+- The contractor treats Vigil-created calendar events or Jobber Visits as real bookings and keeps provider availability accurate.
 - Exceptional, urgent, unsupported, or ambiguous conversations can be handed to the contractor.
 
 The product should integrate with the contractor's existing behavior instead of requiring a separate lead-management dashboard for normal operation. Calendar connection, scheduling preferences, and booking visibility are unavoidable onboarding requirements and should be made explicit.
@@ -100,31 +100,35 @@ The product should integrate with the contractor's existing behavior instead of 
 
 ### 5.1 Product direction
 
-Google Calendar is the first calendar provider. This choice is based on the working assumption that a meaningful share of independent contractors already use Google Calendar to track appointments. That assumption still needs real customer validation, but Google Calendar is the concrete integration target for MVP development.
+Google Calendar and Jobber are the first supported booking providers behind one shared booking contract. Each client selects exactly one active provider and one calendar or Jobber user. There is no automatic cross-provider failover.
+
+Google Calendar remains important for contractors who use a general calendar. Jobber supports contractors already managing clients, properties, Jobs, and Visits in field-service software. Jobber bookings create a one-off Job and scheduled Visit assigned to the configured Jobber user.
+
+The assumption that these systems cover a meaningful share of the target market still requires customer validation. Ordinary Jobber-to-Google calendar sync is not used as a booking write path.
 
 The booking architecture should isolate provider-specific API code so additional calendar systems can be supported later without rewriting the SMS conversation engine.
 
 ### 5.2 Minimum booking capabilities
 
-The first complete calendar implementation should support:
+The implemented booking foundation supports:
 
-- secure per-client Google authorization;
-- selection of the calendar Vigil is allowed to use;
+- secure per-client Google or Jobber authorization;
+- selection of the Google calendar or Jobber user Vigil is allowed to use;
 - client-specific timezone, working hours, service duration, and scheduling constraints;
 - free/busy lookup without exposing unrelated calendar-event details to customers;
 - generation of a small set of valid appointment choices;
 - slot selection through SMS;
 - immediate availability revalidation before booking;
-- idempotent event creation so retries cannot create duplicate appointments;
+- idempotent provider creation so retries cannot create duplicate appointments;
 - storage of the provider event ID and relevant booking state;
 - customer confirmation and contractor-visible event details;
 - a safe handoff when authorization expires, availability changes, or booking fails.
 
-OAuth tokens and calendar credentials must be treated as secrets. The implementation must use the minimum Google scopes required and must not place credentials in SMS content, logs, or committed files.
+OAuth tokens and provider credentials must be treated as secrets. The implementation must use the minimum Google and Jobber scopes required and must not place credentials in SMS content, logs, or committed files.
 
-### 5.3 Planned conversation extension
+### 5.3 Conversation extension
 
-The existing plumbing decision tree currently finishes by handing a qualified lead to the owner. Calendar booking will extend that workflow after the required intake facts have been collected.
+The plumbing decision tree now enters booking after required intake facts have been collected when the service and provider are configured in live mode. Shadow mode computes availability but preserves the existing owner handoff.
 
 The intended state progression is:
 
@@ -133,13 +137,14 @@ awaiting_initial_reply
   -> awaiting_location
   -> awaiting_job_type
   -> awaiting_urgency
+  -> awaiting_customer_name
   -> finding_availability
   -> awaiting_slot_selection
   -> booking
   -> booked
 ```
 
-Terminal alternatives include opt-out, wrong number, no longer needed, manual handoff, and booking failure. Exact state names and persistence contracts should be finalized during implementation, then reflected here.
+Terminal alternatives include opt-out, wrong number, no longer needed, manual handoff, and `booking_handoff`. Customers can reply `1`, `2`, or `3` to choose a slot and `MORE` to request the next page. Offers expire after 15 minutes and selected slots are revalidated immediately before creation.
 
 ## 6. Technical architecture
 
@@ -165,7 +170,12 @@ backend/app/main.py
   webhook idempotency entry points, TwiML responses, and endpoint wiring
 
 backend/app/services/
-  missed-call recovery, inbound SMS orchestration, and action execution
+  missed-call recovery, inbound SMS orchestration, booking orchestration,
+  and action execution
+
+backend/app/booking/
+  provider-neutral contracts, slot generation, encrypted credentials, OAuth,
+  Google and Jobber adapters, guided setup, and Jobber webhook handling
 
 backend/app/repositories/
   Supabase reads and writes
@@ -212,12 +222,12 @@ Customer replies to the Twilio number
   -> inbound SMS and any MMS metadata are recorded
   -> deterministic plumbing classifier extracts intent and intake details
   -> decision-tree run and selected actions are recorded
-  -> action executor sends approved replies, updates lead state,
-     creates opt-outs, notifies the owner, or closes the conversation
+  -> action executor sends approved replies, updates lead state, creates opt-outs,
+     offers booking slots, creates appointments, notifies the owner, or closes
   -> conversation state and summary are updated
 ```
 
-The current classifier is deterministic, not LLM-backed. It recognizes opt-out, wrong-number, no-longer-needed, lead, and unclear intents, and extracts location, plumbing job type, and urgency from message text. The decision tree collects missing details and currently ends in owner handoff once location, job type, and urgency are known.
+The classifier is deterministic, not LLM-backed. It recognizes opt-out, wrong-number, no-longer-needed, lead, and unclear intents, and extracts location, plumbing job type, and urgency. Routine configured work proceeds through customer-name collection and booking. Emergencies, unsupported work, disabled providers, incomplete availability, and failures hand off.
 
 Customer-facing copy is selected from approved templates in `backend/app/decision_tree/templates/base.py`. The action executor supports:
 
@@ -226,8 +236,11 @@ Customer-facing copy is selected from approved templates in `backend/app/decisio
 - `create_opt_out`
 - `notify_owner`
 - `close_conversation`
+- `offer_booking_slots`
+- `create_booking`
+- `booking_handoff`
 
-Calendar availability and booking actions do not exist yet.
+External booking outcomes can override transient decision-tree states before the conversation is persisted once. Duplicate slot replies reuse an existing booking confirmation.
 
 ### 6.5 HTTP endpoints
 
@@ -235,6 +248,12 @@ Calendar availability and booking actions do not exist yet.
 - `POST /webhooks/twilio/voice` handles forwarded missed calls.
 - `POST /webhooks/twilio/sms` handles inbound SMS and MMS metadata.
 - `POST /webhooks/twilio/status` updates outbound SMS delivery status.
+- `GET /booking/setup/claim` exchanges a single-use setup token for a secure session.
+- `GET /booking/setup` renders the contractor booking configuration flow.
+- `POST /booking/setup/oauth/{provider}` and the corresponding callback run OAuth.
+- `POST /booking/setup/config` saves the active resource and per-service rules.
+- `POST /booking/setup/disconnect` disconnects a provider and disables booking.
+- `POST /webhooks/jobber` validates, persists, and asynchronously processes Jobber lifecycle webhooks.
 
 Twilio request-signature validation is enabled by default. It can be disabled only when the runtime environment is explicitly local, development, or test. `PUBLIC_BASE_URL` is used to reconstruct the public webhook URL correctly behind a proxy.
 
@@ -260,7 +279,9 @@ Important database invariants include unique client/lead phone pairs, unique Twi
 
 The tracked migrations add client phone numbers, webhook idempotency, MMS metadata, workflow indexes and constraints, and support for reopening conversations after earlier conversations close. The reopening migration (`20260708011000_allow_reopened_conversations.sql`) exists in the repository but was not present in the remote Supabase migration history when checked on 2026-07-12. The repository also does not currently contain the complete migration history that originally created every base table; this should be corrected before relying on migrations to reproduce the database from scratch.
 
-Calendar integration will require persisted calendar connections and booking records. Those tables and migrations do not exist yet.
+Tracked booking migrations now add `booking_connections`, `booking_configs`, `booking_services`, `booking_slot_offers`, `bookings`, `booking_setup_tokens`, and `booking_oauth_states`, plus durable Jobber webhook payload fields and active-booking uniqueness. All new booking tables enable RLS, revoke `anon` and `authenticated`, and explicitly grant backend access to `service_role`.
+
+These new migrations were created but not applied to the remote project during this implementation. Apply them in order and run Supabase security/performance advisors before deploying booking code.
 
 ### 6.7 Reliability and safety invariants
 
@@ -270,7 +291,7 @@ Calendar integration will require persisted calendar connections and booking rec
 - Treat Twilio webhooks as retryable and potentially duplicated.
 - Record outbound attempts even when Twilio sending fails.
 - Keep customer-facing messages constrained to approved templates.
-- Do not expose the Supabase service-role key or future calendar credentials.
+- Do not expose the Supabase service-role key or provider credentials.
 - Revalidate calendar availability immediately before creating an event.
 - Make booking creation idempotent across message and webhook retries.
 - Preserve enough event, message, decision, and booking history to explain every automated action.
@@ -288,8 +309,15 @@ The backend reads operating-system environment variables first and falls back to
 - `TWILIO_VALIDATE_SIGNATURE`
 - `TWILIO_FORCE_IPV4`
 - `APP_ENV`, `ENVIRONMENT`, or `ENV`
+- `BOOKING_TOKEN_ENCRYPTION_KEY`
+- `BOOKING_SESSION_SECRET`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `JOBBER_CLIENT_ID`
+- `JOBBER_CLIENT_SECRET`
+- `JOBBER_GRAPHQL_VERSION` (currently pinned by default to `2025-04-16`)
 
-Secrets and `.env` files must not be committed. Future Google credentials and token-encryption configuration must follow the same rule.
+Secrets and `.env` files must not be committed. OAuth tokens are encrypted with AES-GCM before persistence. Setup links, setup sessions, and OAuth state use random bearer values whose hashes are stored in Postgres.
 
 The Docker image starts the service with:
 
@@ -320,34 +348,41 @@ Twilio requires a stable public HTTPS endpoint in deployed environments. A local
 - Twilio delivery-status updates
 - Repository, service, decision-tree, and webhook unit tests
 - Docker runtime definition and pinned Python dependencies
+- Provider-neutral booking contracts and timezone/DST-aware slot generation
+- AES-GCM token storage, OAuth state replay protection, CSRF, and rotating refresh-token persistence
+- Google calendar discovery, FreeBusy lookup, deterministic event creation, and duplicate reconciliation
+- Jobber OAuth/GraphQL adapter, account and user discovery, phone identity matching, property reuse, and Job-plus-Visit creation
+- Jobber schema-version safety gate that prevents incomplete availability from going live
+- Single-use guided setup links, provider OAuth, resource selection, per-service scheduling rules, and disconnect flows
+- `disabled`, `shadow`, and `live` booking rollout modes
+- SMS customer-name collection, three-slot offers, `MORE` paging, expiry, final revalidation, booking confirmation, and handoff
+- Durable HMAC-validated Jobber webhooks with replay and `APP_DISCONNECT` handling
+- Booking-specific migrations and automated unit/integration coverage using mocked providers
 
 ### Not implemented
 
-- Google OAuth connection flow
-- Google Calendar provider adapter
-- Calendar selection and client scheduling configuration
-- Availability lookup and slot generation
-- SMS slot selection
-- Booking records and booking-specific database migrations
-- Idempotent Google Calendar event creation
-- Booking confirmation, cancellation, or rescheduling workflows
-- End-to-end automated calendar booking tests
+- Applied remote booking migrations and Supabase advisor verification
+- Configured Google and Jobber developer/test credentials
+- Live Google OAuth, FreeBusy, event-create, and revoke conformance tests
+- Authenticated Jobber GraphiQL verification of the pinned availability and create operations
+- Live Jobber client/property/Job/Visit and webhook conformance tests
+- Production monitoring and a controlled contractor pilot
+- Automated cancellation or rescheduling; these requests intentionally hand off in V1
 - A complete reproducible migration history for the original base schema
 
 ## 8. Next implementation focus
 
-The next major feature is the complete Google Calendar booking path. It should be designed as a vertical slice rather than as disconnected calendar utilities:
+The next focus is provider conformance and controlled rollout:
 
-1. Define the booking domain contract, conversation states, failure states, and provider boundary.
-2. Add migrations for calendar connections, scheduling configuration, and bookings.
-3. Implement secure Google OAuth and token handling.
-4. Implement availability lookup and client-specific slot generation.
-5. Extend decision actions and SMS conversation state to offer and select slots.
-6. Revalidate the selected slot and create the calendar event idempotently.
-7. Send confirmations, record the booking, and notify or hand off on failure.
-8. Add unit, integration, duplicate-delivery, expired-authorization, and slot-race tests.
+1. Apply all pending migrations, including conversation reopening and booking migrations, to a controlled Supabase environment.
+2. Run Supabase advisors and verify service-role access plus public-role denial.
+3. Configure stable HTTPS callbacks and Google/Jobber developer credentials.
+4. Run Google OAuth, calendar discovery, FreeBusy, event-create, duplicate, expiry, and revoke tests.
+5. Verify Jobber queries, mutations, scopes, schedule blockers, and input shapes in authenticated GraphiQL for the pinned version.
+6. Update the Jobber adapter if the authenticated schema differs; only then store matching schema-verification metadata and move a test connection from disabled to shadow.
+7. Run shadow mode with controlled data, then enable live booking for one contractor.
 
-This sequence describes the immediate engineering focus rather than a broader business plan.
+No Jobber account should enter live mode merely because OAuth succeeded.
 
 ## 9. Verification
 
@@ -360,7 +395,7 @@ From `backend/`, run:
 Run type checking from the repository root:
 
 ```text
-pyright
+npx --yes pyright
 ```
 
-Automated tests should mock Twilio, Supabase, and future Google Calendar calls unless a supervised integration test is explicitly being performed. Live SMS, call, database, and calendar tests must use controlled test accounts and must not contact real customers unintentionally.
+Automated tests should mock Twilio, Supabase, Google, and Jobber calls unless a supervised integration test is explicitly being performed. Live SMS, call, database, and provider tests must use controlled test accounts and must not contact real customers unintentionally.
