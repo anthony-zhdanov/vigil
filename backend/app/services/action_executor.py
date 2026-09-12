@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from supabase import Client
@@ -12,6 +12,7 @@ from app.repositories import leads as leads_repo
 from app.repositories import messages as messages_repo
 from app.repositories import opt_outs as opt_outs_repo
 from app.repositories import owner_notifications as owner_notifications_repo
+from app.services.booking_workflow import BookingActionOutcome, BookingOrchestrator
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,15 @@ class ExecutedAction:
     action_type: str
     status: str
     detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActionExecutionResult:
+    actions: list[ExecutedAction]
+    conversation_state: str
+    conversation_status: str
+    collected_info: dict[str, Any]
+    summary: str
 
 
 def _row_id(row: dict[str, Any], context: str) -> str:
@@ -272,13 +282,101 @@ def _execute_close_conversation(
     result: DecisionResult,
     conversation: dict[str, Any],
 ) -> ExecutedAction:
-    conversations_repo.close_conversation(
-        supabase,
-        conversation_id=_row_id(conversation, "conversation"),
-        collected_info=result.collected_info,
-        summary=result.summary,
-    )
     return ExecutedAction(action_type="close_conversation", status="closed")
+
+
+def _execute_booking_outcome(
+    supabase: Client | None,
+    twilio_client: Any | None,
+    *,
+    outcome: BookingActionOutcome,
+    source_action: DecisionAction,
+    result: DecisionResult,
+    client: dict[str, Any],
+    lead: dict[str, Any],
+    conversation: dict[str, Any],
+    customer_phone: str,
+    twilio_number: str,
+    latest_message: str,
+    status_callback_url: str | None,
+) -> list[ExecutedAction]:
+    if outcome.kind == "shadow":
+        return [
+            ExecutedAction(
+                action_type=source_action.type,
+                status="shadow",
+                detail=outcome.detail,
+            )
+        ]
+
+    effective_result = replace(result, collected_info=outcome.collected_info)
+    executed: list[ExecutedAction] = []
+    if outcome.template_key:
+        executed.append(
+            _execute_send_sms_template(
+                supabase,
+                twilio_client,
+                action=DecisionAction(
+                    "send_sms_template", template_key=outcome.template_key
+                ),
+                result=effective_result,
+                client=client,
+                lead=lead,
+                conversation=conversation,
+                customer_phone=customer_phone,
+                twilio_number=twilio_number,
+                latest_message=latest_message,
+                status_callback_url=status_callback_url,
+            )
+        )
+
+    if outcome.kind == "confirmed":
+        executed.append(
+            _execute_mark_lead_status(
+                supabase,
+                action=DecisionAction(
+                    "mark_lead_status", lead_status="appointment_booked"
+                ),
+                result=effective_result,
+                lead=lead,
+            )
+        )
+    elif outcome.kind in {"handoff", "unknown"}:
+        executed.append(
+            _execute_notify_owner(
+                supabase,
+                twilio_client,
+                action=DecisionAction(
+                    "notify_owner", notification_priority="normal"
+                ),
+                result=effective_result,
+                client=client,
+                lead=lead,
+                conversation=conversation,
+                customer_phone=customer_phone,
+                twilio_number=twilio_number,
+                latest_message=latest_message,
+            )
+        )
+        executed.append(
+            _execute_mark_lead_status(
+                supabase,
+                action=DecisionAction(
+                    "mark_lead_status", lead_status="needs_owner_call"
+                ),
+                result=effective_result,
+                lead=lead,
+            )
+        )
+
+    executed.append(
+        ExecutedAction(
+            action_type=source_action.type,
+            status=outcome.kind,
+            detail=outcome.detail,
+        )
+    )
+    return executed
 
 
 def execute_actions(
@@ -293,9 +391,13 @@ def execute_actions(
     customer_phone: str,
     twilio_number: str,
     status_callback_url: str | None = None,
-) -> list[ExecutedAction]:
+    booking_orchestrator: BookingOrchestrator | None = None,
+) -> ActionExecutionResult:
     latest_message = str(inbound_message.get("body") or "")
     executed: list[ExecutedAction] = []
+    final_state = result.conversation_state
+    final_status = result.conversation_status
+    final_info = dict(result.collected_info)
 
     for action in result.actions:
         if action.type == "send_sms_template":
@@ -351,7 +453,69 @@ def execute_actions(
                     supabase, result=result, conversation=conversation
                 )
             )
+        elif action.type in {"offer_booking_slots", "create_booking", "booking_handoff"}:
+            if booking_orchestrator is None:
+                outcome = BookingActionOutcome(
+                    kind="handoff",
+                    template_key="booking_handoff",
+                    conversation_state="booking_handoff",
+                    conversation_status="waiting_for_owner",
+                    collected_info=final_info,
+                    detail="booking_runtime_unavailable",
+                )
+            elif action.type == "offer_booking_slots":
+                outcome = booking_orchestrator.offer_slots(
+                    client_id=_row_id(client, "client"),
+                    lead_id=_row_id(lead, "lead"),
+                    conversation_id=_row_id(conversation, "conversation"),
+                    collected_info=final_info,
+                    page_index=action.booking_page_index or 0,
+                )
+            elif action.type == "create_booking":
+                outcome = booking_orchestrator.create_booking(
+                    client_id=_row_id(client, "client"),
+                    lead_id=_row_id(lead, "lead"),
+                    conversation_id=_row_id(conversation, "conversation"),
+                    customer_phone=customer_phone,
+                    collected_info=final_info,
+                    slot_index=action.booking_slot_index or 0,
+                )
+            else:
+                outcome = BookingActionOutcome(
+                    kind="handoff",
+                    template_key="booking_handoff",
+                    conversation_state="booking_handoff",
+                    conversation_status="waiting_for_owner",
+                    collected_info=final_info,
+                    detail="customer_requested_booking_change",
+                )
+            executed.extend(
+                _execute_booking_outcome(
+                    supabase,
+                    twilio_client,
+                    outcome=outcome,
+                    source_action=action,
+                    result=result,
+                    client=client,
+                    lead=lead,
+                    conversation=conversation,
+                    customer_phone=customer_phone,
+                    twilio_number=twilio_number,
+                    latest_message=latest_message,
+                    status_callback_url=status_callback_url,
+                )
+            )
+            if outcome.kind != "shadow":
+                final_state = outcome.conversation_state
+                final_status = outcome.conversation_status
+                final_info = dict(outcome.collected_info)
         else:
             raise ValueError(f"Unsupported decision action: {action.type}")
 
-    return executed
+    return ActionExecutionResult(
+        actions=executed,
+        conversation_state=final_state,
+        conversation_status=final_status,
+        collected_info=final_info,
+        summary=result.summary,
+    )

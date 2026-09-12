@@ -70,6 +70,7 @@ def run_plumbing_decision_tree(
     message_body: str,
     current_state: str,
     collected_info: dict[str, Any] | None = None,
+    booking_mode: str = "disabled",
 ) -> DecisionResult:
     existing_info = dict(collected_info or {})
     state = current_state or "awaiting_initial_reply"
@@ -123,6 +124,114 @@ def run_plumbing_decision_tree(
             ],
             conversation_state="closed",
             conversation_status="closed",
+            collected_info=next_info,
+            summary=summary,
+        )
+
+    if state == "awaiting_customer_name":
+        customer_name = " ".join(message_body.strip().split())
+        if len(customer_name.split()) < 2 or any(char.isdigit() for char in customer_name):
+            return _result(
+                classifier_output=classifier_output,
+                matched_node_key="collect_customer_name",
+                actions=[
+                    DecisionAction(
+                        "send_sms_template", template_key="request_customer_name"
+                    )
+                ],
+                conversation_state="awaiting_customer_name",
+                conversation_status="waiting_for_customer",
+                collected_info=next_info,
+                summary=summary,
+            )
+        next_info["customer_name"] = customer_name
+        return _result(
+            classifier_output=classifier_output,
+            matched_node_key="find_booking_slots",
+            actions=[DecisionAction("offer_booking_slots", booking_page_index=0)],
+            conversation_state="finding_availability",
+            conversation_status="waiting_for_system",
+            collected_info=next_info,
+            summary=summary,
+        )
+
+    if state == "awaiting_slot_selection":
+        normalized_reply = message_body.strip().lower()
+        if any(word in normalized_reply for word in ("cancel", "reschedule", "change")):
+            return _result(
+                classifier_output=classifier_output,
+                matched_node_key="booking_change_handoff",
+                actions=[DecisionAction("booking_handoff")],
+                conversation_state="booking_handoff",
+                conversation_status="waiting_for_owner",
+                collected_info=next_info,
+                summary=summary,
+            )
+        if normalized_reply == "more":
+            page_index = int(next_info.get("booking_page_index") or 0) + 1
+            return _result(
+                classifier_output=classifier_output,
+                matched_node_key="more_booking_slots",
+                actions=[
+                    DecisionAction("offer_booking_slots", booking_page_index=page_index)
+                ],
+                conversation_state="finding_availability",
+                conversation_status="waiting_for_system",
+                collected_info=next_info,
+                summary=summary,
+            )
+        if normalized_reply in {"1", "2", "3"}:
+            return _result(
+                classifier_output=classifier_output,
+                matched_node_key="create_booking",
+                actions=[
+                    DecisionAction(
+                        "create_booking",
+                        booking_slot_index=int(normalized_reply) - 1,
+                    )
+                ],
+                conversation_state="booking",
+                conversation_status="waiting_for_system",
+                collected_info=next_info,
+                summary=summary,
+            )
+        return _result(
+            classifier_output=classifier_output,
+            matched_node_key="invalid_slot_selection",
+            actions=[
+                DecisionAction(
+                    "send_sms_template", template_key="invalid_slot_selection"
+                )
+            ],
+            conversation_state="awaiting_slot_selection",
+            conversation_status="waiting_for_customer",
+            collected_info=next_info,
+            summary=summary,
+        )
+
+    if state == "booked" and message_body.strip() in {"1", "2", "3"}:
+        return _result(
+            classifier_output=classifier_output,
+            matched_node_key="repeat_booking_confirmation",
+            actions=[
+                DecisionAction(
+                    "create_booking",
+                    booking_slot_index=int(message_body.strip()) - 1,
+                )
+            ],
+            conversation_state="booking",
+            conversation_status="waiting_for_system",
+            collected_info=next_info,
+            summary=summary,
+        )
+
+    if state in {"booked", "booking", "finding_availability", "booking_handoff"}:
+        return _result(
+            classifier_output=classifier_output,
+            matched_node_key="booking_followup_handoff",
+            actions=[DecisionAction("booking_handoff")],
+            conversation_state="booking_handoff",
+            conversation_status="waiting_for_owner",
             collected_info=next_info,
             summary=summary,
         )
@@ -221,6 +330,28 @@ def run_plumbing_decision_tree(
             collected_info=next_info,
             summary=summary,
         )
+
+    if urgency != "emergency" and booking_mode == "live":
+        actions.extend(
+            [
+                DecisionAction(
+                    "send_sms_template", template_key="request_customer_name"
+                ),
+                DecisionAction("mark_lead_status", lead_status="needs_customer_name"),
+            ]
+        )
+        return _result(
+            classifier_output=classifier_output,
+            matched_node_key="collect_customer_name",
+            actions=actions,
+            conversation_state="awaiting_customer_name",
+            conversation_status="waiting_for_customer",
+            collected_info=next_info,
+            summary=summary,
+        )
+
+    if urgency != "emergency" and booking_mode == "shadow":
+        actions.append(DecisionAction("offer_booking_slots", booking_page_index=0))
 
     actions.append(DecisionAction("send_sms_template", template_key="handoff_to_team"))
     if not any(action.type == "notify_owner" for action in actions) and not (

@@ -184,6 +184,73 @@ class RunPlumbingDecisionTreeTests(unittest.TestCase):
         self.assertEqual(template_keys(result), ["handoff_to_team"])
         self.assertIn("notify_owner", action_types(result))
 
+    def test_live_booking_collects_full_name_after_intake(self) -> None:
+        result = run_plumbing_decision_tree(
+            message_body="This week",
+            current_state="awaiting_urgency",
+            collected_info={
+                "location": "10 King St",
+                "job_type": "drain_or_sewer",
+            },
+            booking_mode="live",
+        )
+
+        self.assertEqual(result.matched_node_key, "collect_customer_name")
+        self.assertEqual(result.conversation_state, "awaiting_customer_name")
+        self.assertEqual(template_keys(result), ["request_customer_name"])
+
+    def test_booking_name_and_slot_replies_emit_typed_actions(self) -> None:
+        named = run_plumbing_decision_tree(
+            message_body="Alex Smith",
+            current_state="awaiting_customer_name",
+            collected_info={
+                "location": "10 King St",
+                "job_type": "drain_or_sewer",
+                "urgency": "scheduled",
+            },
+            booking_mode="live",
+        )
+        selected = run_plumbing_decision_tree(
+            message_body="2",
+            current_state="awaiting_slot_selection",
+            collected_info={**named.collected_info, "booking_page_index": 0},
+            booking_mode="live",
+        )
+
+        self.assertEqual(named.collected_info["customer_name"], "Alex Smith")
+        self.assertEqual(named.actions[0].type, "offer_booking_slots")
+        self.assertEqual(selected.actions[0].type, "create_booking")
+        self.assertEqual(selected.actions[0].booking_slot_index, 1)
+
+    def test_more_pages_slots_and_booking_changes_handoff(self) -> None:
+        more = run_plumbing_decision_tree(
+            message_body="MORE",
+            current_state="awaiting_slot_selection",
+            collected_info={"booking_page_index": 1},
+            booking_mode="live",
+        )
+        change = run_plumbing_decision_tree(
+            message_body="Can I reschedule?",
+            current_state="booked",
+            collected_info={"booking_id": "booking-1"},
+            booking_mode="live",
+        )
+
+        self.assertEqual(more.actions[0].booking_page_index, 2)
+        self.assertEqual(change.actions[0].type, "booking_handoff")
+
+    def test_repeated_slot_reply_replays_booking_confirmation(self) -> None:
+        result = run_plumbing_decision_tree(
+            message_body="2",
+            current_state="booked",
+            collected_info={"booking_id": "booking-1"},
+            booking_mode="live",
+        )
+
+        self.assertEqual(result.matched_node_key, "repeat_booking_confirmation")
+        self.assertEqual(result.actions[0].type, "create_booking")
+        self.assertEqual(result.actions[0].booking_slot_index, 1)
+
     def test_previously_notified_emergency_does_not_notify_owner_again(self) -> None:
         result = run_plumbing_decision_tree(
             message_body="Thanks",

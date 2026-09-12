@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from app.services.booking_workflow import BookingActionOutcome
 from app.services.sms_workflow import process_inbound_sms
 
 
@@ -135,6 +136,7 @@ class WorkflowHarness:
         message_sid: str = "SM_IN_1",
         raw_payload: dict[str, Any] | None = None,
         status_callback_url: str | None = None,
+        booking_orchestrator: Any | None = None,
     ) -> Any:
         payload = raw_payload or {
             "From": self.customer_phone,
@@ -152,6 +154,7 @@ class WorkflowHarness:
                 message_sid=message_sid,
                 raw_payload=payload,
                 status_callback_url=status_callback_url,
+                booking_orchestrator=booking_orchestrator,
             )
 
     def inbound_messages(self) -> list[dict[str, Any]]:
@@ -233,6 +236,88 @@ class WorkflowHarness:
 
 
 class SmsWorkflowTests(unittest.TestCase):
+    def test_booking_name_reply_offers_slots_and_overrides_transient_state(self) -> None:
+        harness = WorkflowHarness()
+        harness.conversation.update(
+            {
+                "current_state": "awaiting_customer_name",
+                "collected_info": {
+                    "location": "10 King St",
+                    "job_type": "drain_or_sewer",
+                    "urgency": "scheduled",
+                },
+            }
+        )
+
+        class Orchestrator:
+            def booking_mode(self, client_id: str, collected_info: dict[str, Any]) -> str:
+                return "live"
+
+            def offer_slots(self, **kwargs: Any) -> BookingActionOutcome:
+                info = {
+                    **kwargs["collected_info"],
+                    "slot_options": "1. Tue, Jul 14 at 9:00 AM\n2. Tue, Jul 14 at 10:00 AM",
+                }
+                return BookingActionOutcome(
+                    "offered",
+                    "booking_slots",
+                    "awaiting_slot_selection",
+                    "waiting_for_customer",
+                    info,
+                )
+
+        result = harness.process("Alex Smith", booking_orchestrator=Orchestrator())
+
+        self.assertEqual(result.matched_node_key, "find_booking_slots")
+        self.assertEqual(
+            harness.outbound_messages()[-1]["template_key"], "booking_slots"
+        )
+        self.assertIn("Reply 1, 2, or 3", harness.outbound_messages()[-1]["body"])
+        final = harness.conversation_updates[-1]
+        self.assertEqual(final["current_state"], "awaiting_slot_selection")
+        self.assertEqual(final["collected_info"]["customer_name"], "Alex Smith")
+
+    def test_slot_selection_confirms_booking_and_updates_lead(self) -> None:
+        harness = WorkflowHarness()
+        harness.conversation.update(
+            {
+                "current_state": "awaiting_slot_selection",
+                "collected_info": {
+                    "location": "10 King St",
+                    "job_type": "drain_or_sewer",
+                    "urgency": "scheduled",
+                    "customer_name": "Alex Smith",
+                },
+            }
+        )
+
+        class Orchestrator:
+            def booking_mode(self, client_id: str, collected_info: dict[str, Any]) -> str:
+                return "live"
+
+            def create_booking(self, **kwargs: Any) -> BookingActionOutcome:
+                return BookingActionOutcome(
+                    "confirmed",
+                    "booking_confirmation",
+                    "booked",
+                    "booked",
+                    {
+                        **kwargs["collected_info"],
+                        "booking_id": "booking-1",
+                        "booking_time": "Tue, Jul 14 at 10:00 AM",
+                    },
+                )
+
+        result = harness.process("2", booking_orchestrator=Orchestrator())
+
+        self.assertEqual(result.matched_node_key, "create_booking")
+        self.assertEqual(
+            harness.outbound_messages()[-1]["template_key"], "booking_confirmation"
+        )
+        self.assertEqual(harness.lead_status_updates[-1]["status"], "appointment_booked")
+        self.assertEqual(harness.conversation_updates[-1]["current_state"], "booked")
+        self.assertEqual(harness.conversation_updates[-1]["status"], "booked")
+
     def test_normal_reply_collects_location_and_sends_request(self) -> None:
         harness = WorkflowHarness()
 
@@ -285,9 +370,8 @@ class SmsWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(harness.opt_out_creates[-1]["reason"], "stop")
         self.assertEqual(harness.lead_status_updates[-1]["status"], "opted_out")
-        self.assertEqual(
-            harness.close_conversation_calls[-1]["conversation_id"], "conversation_1"
-        )
+        self.assertEqual(harness.close_conversation_calls, [])
+        self.assertEqual(len(harness.conversation_updates), 1)
         self.assertEqual(harness.conversation_updates[-1]["status"], "closed")
 
     def test_wrong_number_reply_opts_out_and_closes(self) -> None:
